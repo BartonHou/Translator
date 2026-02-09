@@ -1,0 +1,65 @@
+services:
+  api:
+    build: .
+    container_name: translator_api
+    environment:
+      APP_ENV: "prod"
+      LOG_LEVEL: "INFO"
+      DEVICE: "cpu"
+      HF_MODEL_CACHE: "/models"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/2"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/translator"
+      API_KEY: "dev-api-key"
+      RATE_LIMIT_RPM: "60"
+      CACHE_TTL_SECONDS: "86400"
+    ports:
+      - "8000:8000"
+    volumes:
+      - hf_models:/models
+    depends_on:
+      - redis
+      - postgres
+
+  worker:
+    build: .
+    container_name: translator_worker
+    command: ["bash", "-lc", "celery -A app.workers.celery_app.celery worker -l INFO -Q translate"]
+    environment:
+      APP_ENV: "prod"
+      LOG_LEVEL: "INFO"
+      DEVICE: "cpu"
+      HF_MODEL_CACHE: "/models"
+      REDIS_URL: "redis://redis:6379/0"
+      CELERY_BROKER_URL: "redis://redis:6379/1"
+      CELERY_RESULT_BACKEND: "redis://redis:6379/2"
+      DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/translator"
+      CACHE_TTL_SECONDS: "86400"
+    volumes:
+      - hf_models:/models
+    depends_on:
+      - redis
+      - postgres
+
+  redis:
+    image: redis:7
+    container_name: translator_redis
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16
+    container_name: translator_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: translator
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  hf_models:
+  pgdata:

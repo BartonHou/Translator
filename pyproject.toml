@@ -1,0 +1,24 @@
+[project]
+name = "translator-platform"
+version = "0.1.0"
+description = "Production-oriented translation platform (FastAPI + HF + Redis + Celery + Postgres)"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "sqlalchemy>=2.0",
+  "psycopg2-binary>=2.9",
+  "redis>=5.0",
+  "celery>=5.3",
+  "structlog>=24.1",
+  "prometheus-client>=0.20",
+  "spacy>=3.7",
+  "transformers>=4.42",
+  "torch>=2.2",
+  "sentencepiece>=0.2.0",
+]
+
+[tool.setuptools]
+packages = ["app"]
