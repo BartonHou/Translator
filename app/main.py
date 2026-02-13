@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import PlainTextResponse
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
@@ -5,9 +7,9 @@ import structlog
 
 from app.logging_config import configure_logging
 from app.settings import settings
-from app.infra.db import init_db
-from app.infra.redis_client import get_redis
-from app.infra.cache import RedisCache
+from infra.db import init_db
+from infra.redis_client import get_redis
+from infra.cache import RedisCache
 from app.inference.model_manager import ModelManager
 from app.inference.engine import InferenceEngine
 from app.core.orchestrator import Orchestrator
@@ -17,24 +19,43 @@ from app.api.v1_translate import router as translate_router
 from app.api.v1_jobs import router as jobs_router
 from app.api.v1_models import router as models_router
 
+
 configure_logging()
 log = structlog.get_logger()
 
-# DB tables
-init_db()
 
-# Singletons (API process)
-redis_client = get_redis()
-cache = RedisCache(redis_client)
-mm = ModelManager()
-engine = InferenceEngine(mm)
-orchestrator = Orchestrator(engine, cache)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    init_db()
 
-app = FastAPI(title="translator-platform", version="0.1.0")
+    redis_client = get_redis()
+    cache = RedisCache(redis_client)
+
+    mm = ModelManager()
+    engine = InferenceEngine(mm)
+    orchestrator = Orchestrator(engine, cache)
+
+    app.state.redis = redis_client
+    app.state.cache = cache
+    app.state.model_manager = mm
+    app.state.engine = engine
+    app.state.orchestrator = orchestrator
+
+    log.info("app_startup", env=settings.app_env, device=mm.device)
+
+    yield
+
+    # Shutdown (optional cleanup)
+    log.info("app_shutdown")
+
+
+app = FastAPI(title="translator-platform", version="0.1.0", lifespan=lifespan)
 
 app.include_router(models_router)
 app.include_router(translate_router)
 app.include_router(jobs_router)
+
 
 @app.middleware("http")
 async def metrics_middleware(request: Request, call_next):
@@ -46,19 +67,25 @@ async def metrics_middleware(request: Request, call_next):
         REQ_COUNT.labels(path=request.url.path, method=request.method, status="500").inc()
         raise
 
+
 @app.get("/metrics")
 def metrics():
     data = generate_latest()
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)
 
+
 @app.get("/health")
-def health():
+def health(request: Request):
+    mm = getattr(request.app.state, "model_manager", None)
+    loaded = mm.loaded_models() if mm else []
+    device = mm.device if mm else "unknown"
     return {
         "status": "ok",
         "env": settings.app_env,
-        "device": mm.device,
-        "loaded_models": mm.loaded_models(),
+        "device": device,
+        "loaded_models": loaded,
     }
+
 
 @app.get("/")
 def root():

@@ -4,7 +4,7 @@ import structlog
 import spacy
 
 from app.inference.model_manager import ModelManager
-from app.infra.cache import RedisCache
+from infra.cache import RedisCache
 
 log = structlog.get_logger()
 

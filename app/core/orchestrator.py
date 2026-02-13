@@ -6,7 +6,7 @@ import structlog
 from app.core.routing import resolve_model
 from app.core.policies import decide_sync_or_async, PolicyDecision
 from app.inference.engine import InferenceEngine
-from app.infra.cache import RedisCache
+from infra.cache import RedisCache
 from app.metrics import TRANSLATE_LATENCY
 
 log = structlog.get_logger()

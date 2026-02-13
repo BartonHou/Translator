@@ -3,31 +3,37 @@ from sqlalchemy.orm import Session
 import structlog
 
 from app.settings import settings
-from app.domain.schemas import TranslateRequest, TranslateResponse
-from app.infra.redis_client import get_redis
-from app.infra.rate_limit import enforce_rate_limit
-from app.infra.db import get_db
+from domain.schemas import TranslateRequest, TranslateResponse
+from infra.rate_limit import enforce_rate_limit
+from infra.db import get_db
 from app.metrics import REQ_COUNT
-from app.main import orchestrator  # initialized singleton
+from app.api.deps import get_orchestrator, get_redis
+from app.core.orchestrator import Orchestrator
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/v1", tags=["translate"])
+
 
 def require_api_key(x_api_key: str | None = Header(default=None)):
     if x_api_key != settings.api_key:
         raise HTTPException(status_code=401, detail="invalid api key")
     return x_api_key
 
+
 @router.post("/translate", response_model=TranslateResponse)
-def translate(req: TranslateRequest, request: Request, api_key: str = Depends(require_api_key), db: Session = Depends(get_db)):
-    r = get_redis()
+def translate(
+    req: TranslateRequest,
+    api_key: str = Depends(require_api_key),
+    db: Session = Depends(get_db),
+    orchestrator: Orchestrator = Depends(get_orchestrator),
+    r=Depends(get_redis),
+):
     try:
         enforce_rate_limit(r, api_key=api_key, rpm=settings.rate_limit_rpm)
     except PermissionError:
         REQ_COUNT.labels(path="/v1/translate", method="POST", status="429").inc()
         raise HTTPException(status_code=429, detail="rate limit exceeded")
 
-    # policy: refuse too big sync (guide user to jobs endpoint)
     decision = orchestrator.decide(req.texts)
     if decision.use_async:
         REQ_COUNT.labels(path="/v1/translate", method="POST", status="413").inc()

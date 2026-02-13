@@ -25,7 +25,7 @@ services:
   worker:
     build: .
     container_name: translator_worker
-    command: ["bash", "-lc", "celery -A app.workers.celery_app.celery worker -l INFO -Q translate"]
+    command: ["bash", "-lc", "celery -A workers.celery_app.celery worker -l INFO -Q translate"]
     environment:
       APP_ENV: "prod"
       LOG_LEVEL: "INFO"

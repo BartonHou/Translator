@@ -1,0 +1,181 @@
+So, now we want to run this project. 
+We need to figure out how this is going to work
+First I need to figure out how docker compose work
+there are too many unknown information,
+we need to find the most information for us now
+Let's try to figure out how dockerfile work
+If we understand everything,
+that means we waste a lot of time and resource,
+Which means we only need to know how to run it
+only if we need to figure out how it work, 
+suppose we unbox the blackbox
+
+Okay, so what are we suppose to do?
+
+OK， that means there are other issues. 
+And we needs to start from bottom to understand how it is going to 
+Let's skim through the test
+I mean is this a great idea.
+Because it is of course a terrible idea if we understand everything
+I mean we could quickly input into chatgpt and understand the basic meaning 
+
+OK, that is a lot of info, and we definietly need to break it apart. 
+First, there are some keywords we needs to understand,
+ there is a backend structure we need to understand,
+Okay, first let's list out the keywords
+
+Redis,Celery Worker, PostgreSQL 
+
+That is probably not a good way to work on this. 
+The thing is, if we understand everything. It gonna take time
+Time is a very valuable resource. 
+So, uhh, the best way is to run the basic,
+and then come back and search for specific
+
+Okay, so let's keep working on the dockerfile
+
+Yes, we indeed succesfully working on docker. 
+So uhh, what do we need. 
+
+uhh， bro. I need a way to be motivated. 
+Listen for story is way too boring
+let's keep inference.
+Okay, so u think normal work are generally boring 
+and definitely not tolerable. 
+That is because normal work generally cannot reform the rules
+The key idea is to reform the rules.
+Because reform the rules we need to know what is the boundary
+Boundary is the testing is too boring 
+Okay is this true, and why this is boring.
+If your only explanation is, 
+this is learn new knowledge can not reform the rules
+chance are most likely there must be something wrong with the way we are doing it
+Recap about how did we learn about the old knowledge.
+No matter it is about computer science or inference
+The most important is break through impossible
+So, if we can create something impossible,
+that will be determine as interesting.
+Okay, so we have to make our new project impossible
+Okay but the problem is the old way to do it is still impossible
+I didn't know how to make a website, we don't familier with how website building work
+but now we do know how website building work
+Or, this assumption is completely wrong. We are boring because information density
+Inference and early computer is interesting because their insane information density
+but as we progress, the information density decrease dramatically
+So the problem is how to increase the information density
+The basic tutorial is necessary. We have to learn about the idea.
+We are struggle with the basic tutorial. 
+I mean how did the project have such huge amount of information density
+Okay, the problem is copy and paste. It is because black box.
+Probably the best way is to run other people code and try to do implantation
+OKay, that is not crazy hard
+
+Okay, so no matter what this is just way too boring
+Let's work on the it 
+
+I don't really know what exactly happened,
+but the issue is still energy problem, Bruh
+It is not a big deal, so long as we make progress
+Okay, so no matter what we do. 
+As long as we start to make mistake. 
+Problem going to show up.
+Now everything become extremely simple. 
+I mean we have to start to make changes for our chronoes code
+Not a big deal, 
+just remember you don't have to build everything start from scratch
+okay, what the issue here. You need to understand our system work smoothly during skiing
+Which means the problem exist in feedback loop
+we get the feedback too slow
+Okay no matter what, let's start to build a website for a while, then chronos
+That deos sounds like a good plan 
+
+Okay I kinda understand how is this work
+It start by building a schema and tasks file.
+This is actually a very standard pipline. 
+But the problem is, where is celery worker
+okay we found it, it is been embeded inside of the task
+
+I mean, now we could start to look at how other section work together
+
+Okay, problem found. We found we are not very clear with how dockerfile work
+Let's download a repo to understand docker file
+
+So dockerfile resposible for building environments
+
+Okay, it doesn't matters, u just have to create new environment. Or it is going to cause a lot of conflicts
+Okay, so there are several things exist. First I don't know why but I think we need a rest.
+ For some reason, I did consume a lot of energy. Second issue is How do we be able to found bug? 
+I want to tell u brain. It is very possible that our strategy is terribe.
+ So, it is not importnat wheter we finish or giving up
+
+Okay, so now the problem is the port is already allocated. 
+And we know the port is 5432
+The old issue, probably the issue lie in 5432, some other process is working on this port
+
+Okay, so this is a very vague question. 
+But this must have something to do with working directory
+I mean we definietly could keep going through this the bug and find the error
+Or we could redefine the question
+The error means the directory in the container is fxxked up
+so we need to learn how to debug the diretory and also where did each been used
+Ok, this problem is way too vague too. We know we have fxxked up the directory
+But we indeed don't know what is wrong over here
+Okay, we do know the our base location is app
+I mean the best way for us to learn is to learn about how container location work 
+
+Okay now the problem become ambiguous again, 
+I mean now we understand that the container did not copy correctly
+
+Okay, so there are a lot of issues exist
+Why is everything my responsibility
+
+Okay, so what should we do now.
+Let's brainstorm how this is going to work out
+We are going to keep running our docker project
+
+So as u can see, it is the old problem
+It is very clear that the container space have no file app
+This is very strange. 
+
+Alright, so the problem is there are way too many ambiguities
+
+I am really strong bro
+All I need to do is to reduce ambiguity
+Okay, so let's distill a little
+
+Okay so for now I don't see whole lot of difference
+Now, there are a lot ambiguity
+That means there are some default understanding we missed
+So we should understand how a container is been started
+
+Okay, there are some default setting that is wrong. There are many ambiguities
+Bro, how do u suppose to define the problem
+
+Probably the ambiguities does not exist.
+
+If we switch fast enough, such problem will not exist
+OKay, let's try to switch context. 
+
+
+Okay, so we assume that chatgpt knows the answer 
+If we don't know much about 
+
+I mean we can even explore 
+
+This is actually a very terrible idea, 
+what you should do is to cut the documentation and run individually
+
+Bro, u know that boss is not going to pay for this. 
+So the problem is actually lying on the floor, understand each section
+
+I mean I am kinda rigt, as long as we can get the feedback fast enough
+We most likely will be fine
+
+Your feedback is actually wrong
+
+Okay, so there are two way
+
+Okay there is an issue, circular import issue.
+The problem with such issue
+Find a way to test the structure, distill a new rule to deal withe problem
+First, if u see two module are deep inside the root, and

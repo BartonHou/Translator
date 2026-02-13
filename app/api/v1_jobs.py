@@ -5,13 +5,13 @@ from sqlalchemy.orm import Session
 import structlog
 
 from app.settings import settings
-from app.domain.schemas import JobCreateRequest, JobStatusResponse, JobResultResponse
-from app.domain.models import TranslationJob
-from app.infra.db import get_db
-from app.infra.redis_client import get_redis
-from app.infra.rate_limit import enforce_rate_limit
+from domain.schemas import JobCreateRequest, JobStatusResponse, JobResultResponse
+from domain.models import TranslationJob
+from infra.db import get_db
+from infra.redis_client import get_redis
+from infra.rate_limit import enforce_rate_limit
 from app.metrics import REQ_COUNT, JOBS_CREATED
-from app.workers.tasks import translate_job_async
+from workers.tasks import translate_job_async
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/v1", tags=["jobs"])

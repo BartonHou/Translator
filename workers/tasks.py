@@ -3,12 +3,12 @@ import time
 from datetime import datetime
 import structlog
 
-from app.workers.celery_app import celery
+from workers.celery_app import celery
 from app.settings import settings
-from app.domain.models import TranslationJob
-from app.infra.db import SessionLocal, init_db
-from app.infra.redis_client import get_redis
-from app.infra.cache import RedisCache
+from domain.models import TranslationJob
+from infra.db import SessionLocal, init_db
+from infra.redis_client import get_redis
+from infra.cache import RedisCache
 from app.inference.model_manager import ModelManager
 from app.inference.engine import InferenceEngine
 from app.core.orchestrator import Orchestrator
