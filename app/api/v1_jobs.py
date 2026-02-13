@@ -11,6 +11,7 @@ from infra.db import get_db
 from infra.redis_client import get_redis
 from infra.rate_limit import enforce_rate_limit
 from app.metrics import REQ_COUNT, JOBS_CREATED
+from app.core.routing import resolve_model_path
 from workers.tasks import translate_job_async
 
 log = structlog.get_logger()
@@ -32,6 +33,12 @@ def create_job(req: JobCreateRequest, api_key: str = Depends(require_api_key), d
 
     if len(req.texts) > settings.max_job_texts:
         raise HTTPException(status_code=413, detail=f"too many texts (> {settings.max_job_texts})")
+
+    try:
+        resolve_model_path(req.source_lang, req.target_lang)
+    except ValueError as e:
+        REQ_COUNT.labels(path="/v1/jobs", method="POST", status="400").inc()
+        raise HTTPException(status_code=400, detail=str(e))
 
     job = TranslationJob(
         status="PENDING",

@@ -100,4 +100,32 @@ describe("App", () => {
     );
     expect(options.sort()).toEqual(["en", "zh"]);
   });
+
+  it("allows multi-to-multi target selection when pivot mode is enabled", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        registry: {
+          "en->es": "model-a",
+          "es->en": "model-b",
+          "en->de": "model-c",
+          "de->en": "model-d"
+        },
+        supported_languages: ["en", "es", "de"],
+        supports_multi_to_multi_via_pivot: true
+      }),
+      text: async () => ""
+    });
+
+    render(<App />);
+
+    const sourceSelect = await screen.findByLabelText("Source language");
+    const targetSelect = await screen.findByLabelText("Target language");
+
+    await userEvent.selectOptions(sourceSelect, "es");
+    const options = Array.from(targetSelect.querySelectorAll("option")).map(
+      (opt) => opt.value
+    );
+    expect(options.sort()).toEqual(["de", "en"]);
+  });
 });

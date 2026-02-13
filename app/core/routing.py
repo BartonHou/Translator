@@ -18,8 +18,34 @@ MODEL_REGISTRY = {
     ("fr", "en"): "Helsinki-NLP/opus-mt-fr-en",
 }
 
+PIVOT_LANG = "en"
+SUPPORTED_LANGUAGES = sorted({lang for pair in MODEL_REGISTRY.keys() for lang in pair})
+
+
 def resolve_model(source_lang: str, target_lang: str) -> str:
     key = (source_lang.lower(), target_lang.lower())
     if key not in MODEL_REGISTRY:
         raise ValueError(f"Unsupported language pair: {source_lang}->{target_lang}")
     return MODEL_REGISTRY[key]
+
+
+def resolve_model_path(source_lang: str, target_lang: str) -> list[str]:
+    src = source_lang.lower().strip()
+    tgt = target_lang.lower().strip()
+
+    if src == tgt:
+        return []
+
+    direct = MODEL_REGISTRY.get((src, tgt))
+    if direct:
+        return [direct]
+
+    src_to_pivot = MODEL_REGISTRY.get((src, PIVOT_LANG))
+    pivot_to_tgt = MODEL_REGISTRY.get((PIVOT_LANG, tgt))
+    if src_to_pivot and pivot_to_tgt:
+        return [src_to_pivot, pivot_to_tgt]
+
+    raise ValueError(
+        f"Unsupported language pair: {source_lang}->{target_lang}. "
+        f"Supported languages: {', '.join(SUPPORTED_LANGUAGES)}"
+    )

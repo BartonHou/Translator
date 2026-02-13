@@ -40,14 +40,18 @@ def translate(
         raise HTTPException(status_code=413, detail=f"sync budget exceeded: {decision.reason}. use /v1/jobs")
 
     opts = req.options or {}
-    model, outs, latency_ms, cache_hit_rate = orchestrator.translate_sync(
-        source_lang=req.source_lang,
-        target_lang=req.target_lang,
-        texts=req.texts[: settings.max_sync_texts],
-        beam_size=getattr(opts, "beam_size", 4),
-        max_new_tokens=getattr(opts, "max_new_tokens", 256),
-        split_long=getattr(opts, "split_long", True),
-    )
+    try:
+        model, outs, latency_ms, cache_hit_rate = orchestrator.translate_sync(
+            source_lang=req.source_lang,
+            target_lang=req.target_lang,
+            texts=req.texts[: settings.max_sync_texts],
+            beam_size=getattr(opts, "beam_size", 4),
+            max_new_tokens=getattr(opts, "max_new_tokens", 256),
+            split_long=getattr(opts, "split_long", True),
+        )
+    except ValueError as e:
+        REQ_COUNT.labels(path="/v1/translate", method="POST", status="400").inc()
+        raise HTTPException(status_code=400, detail=str(e))
 
     REQ_COUNT.labels(path="/v1/translate", method="POST", status="200").inc()
     return TranslateResponse(

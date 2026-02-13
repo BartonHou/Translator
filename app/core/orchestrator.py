@@ -3,7 +3,7 @@ import time
 from typing import List, Tuple
 import structlog
 
-from app.core.routing import resolve_model
+from app.core.routing import resolve_model_path
 from app.core.policies import decide_sync_or_async, PolicyDecision
 from app.inference.engine import InferenceEngine
 from infra.cache import RedisCache
@@ -42,7 +42,9 @@ class Orchestrator:
         max_new_tokens: int,
         split_long: bool,
     ) -> Tuple[str, List[str], float, float]:
-        model_name = resolve_model(source_lang, target_lang)
+        model_path = resolve_model_path(source_lang, target_lang)
+        model_name = " -> ".join(model_path) if model_path else "identity"
+        route_key = "|".join(model_path) if model_path else "identity"
 
         t0 = time.perf_counter()
         total_sentences = 0
@@ -52,24 +54,29 @@ class Orchestrator:
         for t in texts:
             # sentence splitting happens inside engine for consistency,
             # but we cache at whole-text level too (cheap win).
-            cache_key = "tx:" + _hash_key(model_name, str(beam_size), str(max_new_tokens), "T", t.strip())
+            cache_key = "tx:" + _hash_key(route_key, str(beam_size), str(max_new_tokens), "T", t.strip())
             cached = self.cache.get_json(cache_key)
             if cached is not None:
                 cache_hits += 1
                 outputs.append(cached["translation"])
                 continue
 
-            translation, sent_count = self.engine.translate_text(
-                model_name=model_name,
-                text=t,
-                beam_size=beam_size,
-                max_new_tokens=max_new_tokens,
-                split_long=split_long,
-                cache=self.cache,  # sentence-level cache inside
-            )
-            total_sentences += sent_count
-            self.cache.set_json(cache_key, {"translation": translation})
-            outputs.append(translation)
+            current_text = t
+            for stage_model in model_path:
+                translation, sent_count = self.engine.translate_text(
+                    model_name=stage_model,
+                    text=current_text,
+                    beam_size=beam_size,
+                    max_new_tokens=max_new_tokens,
+                    split_long=split_long,
+                    cache=self.cache,  # sentence-level cache inside
+                )
+                total_sentences += sent_count
+                current_text = translation
+
+            final_translation = current_text.strip()
+            self.cache.set_json(cache_key, {"translation": final_translation})
+            outputs.append(final_translation)
 
         latency_ms = (time.perf_counter() - t0) * 1000.0
         TRANSLATE_LATENCY.observe(latency_ms)

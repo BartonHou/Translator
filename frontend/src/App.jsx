@@ -71,6 +71,8 @@ export default function App() {
   const [recent] = useState(MOCK_TRANSLATIONS);
   const [apiError, setApiError] = useState("");
   const [modelRegistry, setModelRegistry] = useState({});
+  const [supportedLanguages, setSupportedLanguages] = useState([]);
+  const [supportsPivot, setSupportsPivot] = useState(false);
   const [lastMeta, setLastMeta] = useState(null);
 
   const charCount = useMemo(() => sourceText.length, [sourceText]);
@@ -100,18 +102,33 @@ export default function App() {
           const pairs = Object.keys(registry)
             .map((key) => key.split("->"))
             .filter((parts) => parts.length === 2);
+          const derivedLanguages = Array.from(
+            new Set(pairs.flat())
+          );
+          const languages =
+            Array.isArray(payload.supported_languages) &&
+            payload.supported_languages.length > 0
+              ? payload.supported_languages
+              : derivedLanguages;
+          setSupportedLanguages(languages);
+          setSupportsPivot(Boolean(payload.supports_multi_to_multi_via_pivot));
           if (pairs.length > 0) {
             setSourceLang((current) =>
-              pairs.some(([src]) => src === current) ? current : pairs[0][0]
+              languages.includes(current) ? current : pairs[0][0]
             );
             setTargetLang((current) =>
-              pairs.some(([, tgt]) => tgt === current) ? current : pairs[0][1]
+              languages.includes(current) ? current : pairs[0][1]
             );
           }
         }
       } catch (error) {
         if (!cancelled) {
           setModelRegistry(MOCK_MODEL_REGISTRY);
+          const pairs = Object.keys(MOCK_MODEL_REGISTRY)
+            .map((key) => key.split("->"))
+            .filter((parts) => parts.length === 2);
+          setSupportedLanguages(Array.from(new Set(pairs.flat())));
+          setSupportsPivot(false);
           setApiError(
             error?.message || "Unable to reach the API. Check the base URL."
           );
@@ -192,17 +209,27 @@ export default function App() {
     .map(([pair]) => pair.split("->"))
     .filter((parts) => parts.length === 2);
   const sourceOptions = Array.from(
-    new Set(supportedPairs.map(([src]) => src))
-  );
-  const targetOptions = Array.from(
     new Set(
-      supportedPairs
-        .filter(([src]) => src === sourceLang)
-        .map(([, tgt]) => tgt)
+      supportedLanguages.length > 0
+        ? supportedLanguages
+        : supportedPairs.map(([src]) => src)
     )
   );
+  const targetOptions = supportsPivot
+    ? sourceOptions.filter((code) => code !== sourceLang)
+    : Array.from(
+        new Set(
+          supportedPairs
+            .filter(([src]) => src === sourceLang)
+            .map(([, tgt]) => tgt)
+        )
+      );
 
   useEffect(() => {
+    if (sourceOptions.length > 0 && !sourceOptions.includes(sourceLang)) {
+      setSourceLang(sourceOptions[0]);
+      return;
+    }
     if (targetOptions.length === 0 && supportedPairs.length > 0) {
       const fallback = supportedPairs.find(([src]) => src === sourceLang);
       if (fallback) {
@@ -211,7 +238,7 @@ export default function App() {
     } else if (targetOptions.length > 0 && !targetOptions.includes(targetLang)) {
       setTargetLang(targetOptions[0]);
     }
-  }, [sourceLang, targetLang, supportedPairs, targetOptions]);
+  }, [sourceLang, targetLang, sourceOptions, supportedPairs, targetOptions]);
 
   return (
     <div className="page">

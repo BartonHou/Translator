@@ -1,14 +1,14 @@
 # Translator Platform
 
-Production-oriented translation platform with a FastAPI backend, Celery worker, Redis caching/rate limiting, PostgreSQL job persistence, and a React frontend.
+Production-oriented multi-language-to-multi-language translation platform with a FastAPI backend, Celery worker, Redis caching/rate limiting, PostgreSQL job persistence, and a React frontend.
 
 ![Translator Platform Web UI](img/webpage.png)
 
 ## What this project does
 
-- Synchronous translation API for small/medium requests.
+- Synchronous multi-language translation API for small/medium requests.
 - Asynchronous job API for large translation batches.
-- Hugging Face model routing by language pair.
+- Hugging Face model routing by language pair (including multi-language to multi-language pairs).
 - Redis-backed caching at both text and sentence level.
 - Redis-backed fixed-window rate limiting per API key.
 - Job tracking persisted in PostgreSQL.
@@ -31,7 +31,10 @@ Current registry supports these language codes:
 - `ko` (Korean)
 - `zh` (Chinese)
 
-Supported translation pairs are currently English <-> each language above.
+Supported translation pairs include:
+
+- Direct English <-> each language above.
+- Multi-language to multi-language pairs across supported languages via English pivot routing (for example `es -> de` runs `es -> en -> de`).
 
 ## Architecture
 
