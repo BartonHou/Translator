@@ -2,6 +2,8 @@
 
 Production-oriented translation platform with a FastAPI backend, Celery worker, Redis caching/rate limiting, PostgreSQL job persistence, and a React frontend.
 
+![Translator Platform Web UI](img/webpage.png)
+
 ## What this project does
 
 - Synchronous translation API for small/medium requests.
