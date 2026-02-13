@@ -73,7 +73,10 @@ class InferenceEngine:
                 max_new_tokens=max_new_tokens,
             )
             for src, r in zip(uniq, results):
-                translated_lookup[src] = r["translation_text"].strip()
+                out = r.get("translation_text") or r.get("generated_text")
+                if out is None:
+                    raise ValueError("pipeline output missing translation/generated text")
+                translated_lookup[src] = out.strip()
 
             # write back cache
             for src in uniq:

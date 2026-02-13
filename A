@@ -178,4 +178,5 @@ Okay, so there are two way
 Okay there is an issue, circular import issue.
 The problem with such issue
 Find a way to test the structure, distill a new rule to deal withe problem
-First, if u see two module are deep inside the root, and
+First, if u see two module are deep inside the root, and circular import
+U should start to use 
