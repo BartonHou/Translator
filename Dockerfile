@@ -8,10 +8,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 
 WORKDIR /app
 
-COPY . /app/
+# Copy dependency manifests first to maximize Docker layer caching.
+COPY pyproject.toml /app/
 
 RUN pip install --upgrade pip \
- && pip install -e .
+ && python -c "import tomllib, pathlib, subprocess, sys; deps = tomllib.loads(pathlib.Path('/app/pyproject.toml').read_text())['project']['dependencies']; subprocess.check_call([sys.executable, '-m', 'pip', 'install', *deps])"
+
+# Copy application code after dependencies are installed.
+COPY . /app/
+
+# Install local package metadata/code without re-installing dependencies.
+RUN pip install --no-deps -e .
 
 
 EXPOSE 8000
