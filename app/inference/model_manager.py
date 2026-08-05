@@ -195,6 +195,7 @@ class ModelManager:
                     **inputs,
                     num_beams=num_beams,
                     max_new_tokens=max_new_tokens,
+                    no_repeat_ngram_size=3,  # curb "你好。 你好。"-style repetition
                 )
             decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
             return [{"translation_text": t} for t in decoded]
@@ -249,6 +250,10 @@ class ModelManager:
                     forced_bos_token_id=forced_bos,
                     num_beams=num_beams,
                     max_new_tokens=max_new_tokens,
+                    # NLLB tends to repeat ("こんにちは こんにちは"); block repeated
+                    # trigrams and lightly penalize repetition.
+                    no_repeat_ngram_size=3,
+                    repetition_penalty=1.1,
                 )
             decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
             return [{"translation_text": t} for t in decoded]

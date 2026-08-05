@@ -4,7 +4,7 @@ import time
 import structlog
 
 from app.core.policies import PolicyDecision, decide_sync_or_async
-from app.core.routing import resolve_model_path
+from app.core.routing import display_path, resolve_model_path
 from app.inference.engine import InferenceEngine
 from app.metrics import TRANSLATE_LATENCY
 from infra.cache import RedisCache
@@ -49,7 +49,7 @@ class Orchestrator:
         stages before yielding.
         """
         model_path = resolve_model_path(source_lang, target_lang)
-        model_name = " -> ".join(model_path) if model_path else "identity"
+        model_name = display_path(model_path)
         sentences = self.engine.split_sentences(text)
         for i, sentence in enumerate(sentences):
             current = sentence
@@ -74,7 +74,7 @@ class Orchestrator:
         split_long: bool,
     ) -> tuple[str, list[str], float, float]:
         model_path = resolve_model_path(source_lang, target_lang)
-        model_name = " -> ".join(model_path) if model_path else "identity"
+        model_name = display_path(model_path)
         route_key = "|".join(model_path) if model_path else "identity"
 
         t0 = time.perf_counter()

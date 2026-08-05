@@ -44,7 +44,60 @@ async function request(path, { method = "GET", body } = {}) {
   return res.json();
 }
 
+// Parse one SSE block ("event: x\ndata: {...}") and dispatch to handlers.
+function dispatchEvent(chunk, { onMeta, onSentence, onDone }) {
+  let event = "message";
+  let data = "";
+  for (const line of chunk.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) data += line.slice(5).trim();
+  }
+  if (!data) return;
+  let payload;
+  try {
+    payload = JSON.parse(data);
+  } catch {
+    return;
+  }
+  if (event === "meta") onMeta?.(payload);
+  else if (event === "done") onDone?.(payload);
+  else onSentence?.(payload);
+}
+
 export const api = {
   models: () => request("/v1/models"),
   translate: (payload) => request("/v1/translate", { method: "POST", body: payload }),
+
+  // Stream a single text: sentences arrive progressively via Server-Sent Events.
+  // handlers: { onMeta({detected_source_lang}), onSentence({index,text,model}), onDone }
+  async translateStream(payload, handlers) {
+    const res = await fetch(`${BASE}/v1/translate/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-Key": API_KEY },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok || !res.body) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const d = await res.json();
+        detail = d.detail || detail;
+      } catch {
+        /* non-json */
+      }
+      throw new Error(detail);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        dispatchEvent(buf.slice(0, idx), handlers);
+        buf = buf.slice(idx + 2);
+      }
+    }
+  },
 };

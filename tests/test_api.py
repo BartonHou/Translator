@@ -99,7 +99,7 @@ class TranslateApiTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body["translations"], ["HELLO"])
-        self.assertEqual(body["model"], "Helsinki-NLP/opus-mt-en-es")
+        self.assertEqual(body["model"], "opus-mt-en-es")
 
     def test_unsupported_pair_returns_400(self):
         client, _ = build_client()
@@ -131,7 +131,7 @@ class TranslateApiTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         body = resp.json()
         self.assertEqual(body["detected_source_lang"], "en")
-        self.assertEqual(body["model"], "Helsinki-NLP/opus-mt-en-es")
+        self.assertEqual(body["model"], "opus-mt-en-es")
 
 
 class JobsApiTests(unittest.TestCase):

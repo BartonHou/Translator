@@ -1,13 +1,30 @@
-:root {
+:root, [data-theme="light"] {
   color-scheme: light;
   --bg: #f7f8fa;
   --surface: #ffffff;
+  --foot-bg: #fafbfc;
   --text: #1a1c22;
   --muted: #6b7280;
   --line: #e6e8ec;
   --accent: #2563eb;
   --accent-hover: #1d4ed8;
   --danger: #dc2626;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1115;
+  --surface: #1a1d24;
+  --foot-bg: #15181e;
+  --text: #e6e8ec;
+  --muted: #9aa0aa;
+  --line: #2a2e37;
+  --accent: #4f83f1;
+  --accent-hover: #3b6fe0;
+  --danger: #f87171;
+}
+
+:root {
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--text);
 }
@@ -121,9 +138,10 @@ select:focus, textarea:focus {
   gap: 12px;
   padding: 10px 14px;
   border-top: 1px solid var(--line);
-  background: #fafbfc;
+  background: var(--foot-bg);
 }
 .count { font-size: 0.8rem; color: var(--muted); }
+.count.over { color: var(--danger); font-weight: 600; }
 
 /* ------- buttons ------- */
 .primary, .ghost {

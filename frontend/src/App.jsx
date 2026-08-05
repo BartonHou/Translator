@@ -2,14 +2,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api.js";
 
+// Native-script names so each language reads naturally in its own script.
 const LANGUAGE_LABELS = {
-  en: "English", es: "Spanish", de: "German", it: "Italian",
-  pt: "Portuguese", ja: "Japanese", ko: "Korean", fr: "French", zh: "Chinese",
+  en: "English", es: "Español", de: "Deutsch", it: "Italiano",
+  pt: "Português", ja: "日本語", ko: "한국어", fr: "Français", zh: "中文",
 };
 const RECENT_KEY = "tp_recent";
+const THEME_KEY = "tp_theme";
+const MAX_CHARS = 6000; // matches backend max_sync_chars
 
 function langLabel(code) {
   return LANGUAGE_LABELS[code] ?? code;
+}
+
+function initialTheme() {
+  const saved = localStorage.getItem(THEME_KEY);
+  if (saved === "light" || saved === "dark") return saved;
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 export default function App() {
@@ -22,6 +31,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [theme, setTheme] = useState(initialTheme);
   const [recent, setRecent] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
@@ -30,6 +40,11 @@ export default function App() {
     }
   });
   const copyTimer = useRef(null);
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
 
   useEffect(() => {
     api.models()
@@ -41,6 +56,7 @@ export default function App() {
     () => (sourceLang === "auto" ? languages : languages.filter((l) => l !== sourceLang)),
     [languages, sourceLang],
   );
+  const overLimit = sourceText.length > MAX_CHARS;
 
   function swap() {
     if (sourceLang === "auto") return; // nothing concrete to swap to
@@ -66,32 +82,46 @@ export default function App() {
   async function translate(e) {
     e.preventDefault();
     setError("");
+    setOutput("");
     setDetected(null);
-    if (!sourceText.trim()) {
+    const text = sourceText.trim();
+    if (!text) {
       setError("Please enter some text to translate.");
       return;
     }
+    if (overLimit) {
+      setError(`Text is too long (max ${MAX_CHARS} characters).`);
+      return;
+    }
     setBusy(true);
+    const parts = [];
+    const join = () => parts.filter((x) => x != null).join(" ");
     try {
-      const data = await api.translate({
-        source_lang: sourceLang,
-        target_lang: targetLang,
-        texts: [sourceText.trim()],
-      });
-      const translated = data.translations?.[0] ?? "";
-      setOutput(translated);
-      setDetected(data.detected_source_lang || null);
-
-      const entry = {
-        id: `${Date.now()}`,
-        from: data.detected_source_lang || sourceLang,
-        to: targetLang,
-        input: sourceText.trim(),
-        output: translated,
-      };
-      const next = [entry, ...recent].slice(0, 6);
-      setRecent(next);
-      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+      await api.translateStream(
+        { source_lang: sourceLang, target_lang: targetLang, text },
+        {
+          onMeta: (m) => m.detected_source_lang && setDetected(m.detected_source_lang),
+          onSentence: (s) => {
+            parts[s.index] = s.text;
+            setOutput(join()); // progressive render as sentences arrive
+          },
+          onDone: () => {
+            const finalOut = join();
+            const entry = {
+              id: `${Date.now()}`,
+              from: detected || sourceLang,
+              to: targetLang,
+              input: text,
+              output: finalOut,
+            };
+            setRecent((prev) => {
+              const next = [entry, ...prev].slice(0, 6);
+              localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+              return next;
+            });
+          },
+        },
+      );
     } catch (err) {
       setError(err.message || "Translation failed.");
     } finally {
@@ -125,17 +155,24 @@ export default function App() {
               <option key={c} value={c}>{langLabel(c)}</option>
             ))}
           </select>
+          <button type="button" className="swap theme-toggle"
+                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                  title="Toggle theme" aria-label="Toggle light/dark theme">
+            {theme === "dark" ? "☀" : "☾"}
+          </button>
         </div>
       </header>
 
       <form className="editor" onSubmit={translate}>
         <div className="pane">
-          <textarea value={sourceText} autoFocus
+          <textarea value={sourceText} autoFocus maxLength={MAX_CHARS}
                     placeholder="Enter text…"
                     onChange={(e) => setSourceText(e.target.value)} />
           <div className="pane-foot">
-            <span className="count">{sourceText.length}</span>
-            <button className="primary" type="submit" disabled={busy}>
+            <span className={overLimit ? "count over" : "count"}>
+              {sourceText.length} / {MAX_CHARS}
+            </span>
+            <button className="primary" type="submit" disabled={busy || overLimit}>
               {busy ? "Translating…" : "Translate"}
             </button>
           </div>
@@ -147,7 +184,7 @@ export default function App() {
           </div>
           <div className="pane-foot">
             <span className="count">
-              {sourceLang === "auto" && detected ? `Detected: ${langLabel(detected)}` : " "}
+              {sourceLang === "auto" && detected ? `Detected: ${langLabel(detected)}` : " "}
             </span>
             <button type="button" className="ghost" onClick={copyOutput} disabled={!output}>
               {copied ? "Copied" : "Copy"}

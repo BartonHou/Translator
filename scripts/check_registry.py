@@ -17,7 +17,7 @@ import urllib.request
 
 # Import the registry without pulling in torch/transformers.
 sys.path.insert(0, ".")
-from app.core.routing import MODEL_REGISTRY  # noqa: E402
+from app.core.routing import MODEL_REGISTRY, NLLB_MODEL  # noqa: E402
 
 HF_API = "https://huggingface.co/api/models/{model}"
 
@@ -38,8 +38,8 @@ def main() -> int:
     parser.add_argument("--offline", action="store_true", help="skip network checks")
     args = parser.parse_args()
 
-    models = sorted(set(MODEL_REGISTRY.values()))
-    print(f"Registry has {len(MODEL_REGISTRY)} pairs, {len(models)} unique models.")
+    models = sorted(set(MODEL_REGISTRY.values()) | {NLLB_MODEL})
+    print(f"Registry has {len(MODEL_REGISTRY)} pairs, {len(models)} unique models (incl. NLLB).")
 
     if args.offline:
         print("Offline mode: registry shape OK.")

@@ -4,6 +4,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "./App.jsx";
 
+// Build a fake SSE streaming Response (mimics res.body.getReader()).
+function sseResponse(blocks) {
+  const text = blocks.map((b) => b + "\n\n").join("");
+  const bytes = new TextEncoder().encode(text);
+  let sent = false;
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: async () =>
+          sent ? { done: true, value: undefined } : ((sent = true), { done: false, value: bytes }),
+      }),
+    },
+    json: async () => ({}),
+    text: async () => text,
+  };
+}
+
 // Route the mocked fetch by path + method so tests read declaratively.
 function mockApi(routes) {
   global.fetch = vi.fn(async (url, opts = {}) => {
@@ -12,7 +31,9 @@ function mockApi(routes) {
     const key = `${method} ${path}`;
     const handler = routes[key];
     if (!handler) throw new Error(`unexpected request: ${key}`);
-    const { status = 200, body = {} } = handler(opts);
+    const result = handler(opts);
+    if (result && result.body && result.body.getReader) return result; // streaming
+    const { status = 200, body = {} } = result;
     return {
       ok: status < 400,
       status,
@@ -29,6 +50,7 @@ const MODELS = {
 
 beforeEach(() => {
   localStorage.clear();
+  document.documentElement.removeAttribute("data-theme");
 });
 afterEach(() => {
   vi.restoreAllMocks();
@@ -51,19 +73,15 @@ describe("Translator", () => {
     expect(values).toContain("en");
   });
 
-  it("translates and shows the result", async () => {
+  it("streams a translation and shows the result + detected language", async () => {
     mockApi({
       "GET /v1/models": () => ({ body: MODELS }),
-      "POST /v1/translate": () => ({
-        body: {
-          model: "Helsinki-NLP/opus-mt-en-zh",
-          translations: ["你好"],
-          latency_ms: 12.4,
-          cache_hit_rate: 0,
-          detected_source_lang: "en",
-          confidence: [0.91],
-        },
-      }),
+      "POST /v1/translate/stream": () =>
+        sseResponse([
+          'event: meta\ndata: {"detected_source_lang":"en"}',
+          'data: {"index":0,"text":"你好","model":"opus-mt-en-zh"}',
+          'event: done\ndata: {"chars_out":2}',
+        ]),
     });
 
     render(<App />);
@@ -75,12 +93,14 @@ describe("Translator", () => {
     expect(await screen.findByText("Detected: English")).toBeInTheDocument();
   });
 
-  it("stores translation in localStorage recent history", async () => {
+  it("stores the streamed translation in localStorage recent history", async () => {
     mockApi({
       "GET /v1/models": () => ({ body: MODELS }),
-      "POST /v1/translate": () => ({
-        body: { model: "m", translations: ["你好"], latency_ms: 1, cache_hit_rate: 0, confidence: [0.8] },
-      }),
+      "POST /v1/translate/stream": () =>
+        sseResponse([
+          'data: {"index":0,"text":"你好","model":"m"}',
+          'event: done\ndata: {"chars_out":2}',
+        ]),
     });
     render(<App />);
     const textarea = await screen.findByPlaceholderText("Enter text…");
@@ -92,9 +112,16 @@ describe("Translator", () => {
       expect(recent.length).toBe(1);
       expect(recent[0].output).toBe("你好");
     });
-
-    // And it appears in the history section.
     const history = screen.getByRole("heading", { name: "History" }).closest("section");
     expect(within(history).getByText("你好")).toBeInTheDocument();
+  });
+
+  it("toggles light/dark theme", async () => {
+    mockApi({ "GET /v1/models": () => ({ body: MODELS }) });
+    render(<App />);
+    const toggle = await screen.findByLabelText("Toggle light/dark theme");
+    const before = document.documentElement.getAttribute("data-theme");
+    await userEvent.click(toggle);
+    expect(document.documentElement.getAttribute("data-theme")).not.toBe(before);
   });
 });

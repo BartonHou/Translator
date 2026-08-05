@@ -57,6 +57,20 @@ def _nllb_route(src: str, tgt: str) -> str:
     return f"nllb:{NLLB_CODES[src]}:{NLLB_CODES[tgt]}"
 
 
+def display_model(model_name: str) -> str:
+    """Human-friendly name for API responses: hide the internal nllb pseudo
+    name and drop the HF org prefix (Helsinki-NLP/opus-mt-en-zh -> opus-mt-en-zh)."""
+    if model_name.startswith("nllb:"):
+        return "nllb-200-distilled-600M"
+    return model_name.split("/")[-1]
+
+
+def display_path(model_path: list[str]) -> str:
+    if not model_path:
+        return "identity"
+    return " -> ".join(display_model(m) for m in model_path)
+
+
 def all_supported_pairs() -> list[dict]:
     """Every resolvable (src, tgt) pair with how it routes.
 

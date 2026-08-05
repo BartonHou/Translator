@@ -7,15 +7,19 @@ Production-oriented multi-language-to-multi-language translation platform with a
 ## What this project does
 
 - Synchronous multi-language translation API for small/medium requests.
+- Streaming (SSE) translation that renders sentence-by-sentence.
 - Asynchronous job API for large translation batches.
 - Hugging Face model routing by language pair (including multi-language to multi-language pairs).
 - Redis-backed caching at both text and sentence level.
-- Redis-backed fixed-window rate limiting per API key.
+- Redis-backed rate limiting per API key.
 - Job tracking persisted in PostgreSQL.
 - Prometheus-compatible metrics endpoint.
-- Web UI for interactive translation.
+- Clean web UI for interactive translation (streaming output, light/dark theme).
 
-This project uses Hugging Face translation models (`Helsinki-NLP/opus-mt-*`) for inference.
+Inference uses two engines: dedicated `Helsinki-NLP/opus-mt-*` models for
+European languages and Chinese, and the multilingual
+`facebook/nllb-200-distilled-600M` model for Japanese and Korean (the opus repos
+for those produce poor output). Routing picks the right engine per pair.
 
 ## Supported Languages
 
@@ -31,10 +35,14 @@ Current registry supports these language codes:
 - `ko` (Korean)
 - `zh` (Chinese)
 
-Supported translation pairs include:
+Any source/target combination among these is supported. Routing decides how:
 
-- Direct English <-> each language above.
-- Multi-language to multi-language pairs across supported languages via English pivot routing (for example `es -> de` runs `es -> en -> de`).
+- **opus-mt** for `en/es/de/it/pt/fr/zh`: direct English <-> each language, and
+  other pairs via English pivot (for example `es -> de` runs `es -> en -> de`).
+- **NLLB** for any pair whose source or target is Japanese or Korean: translated
+  directly, any-to-any, with no English pivot (for example `zh -> ko`).
+
+Call `GET /v1/models` for the exact resolvable pairs and how each one routes.
 
 ## Architecture
 
@@ -49,7 +57,7 @@ Core backend modules:
 - `app/core/orchestrator.py`: sync/async policy decision, caching strategy, routing.
 - `app/inference/model_manager.py`: lazy loading/caching of HF seq2seq models.
 - `app/inference/engine.py`: sentence splitting, dedupe, batch inference.
-- `app/core/routing.py`: language pair to model registry.
+- `app/core/routing.py`: language pair -> model routing (opus-mt registry + NLLB fallback for ja/ko).
 - `workers/tasks.py`: background translation job lifecycle.
 
 ## Quick Start (Docker)
@@ -58,10 +66,23 @@ Requirements:
 
 - Docker + Docker Compose
 
-Run:
+Run (CPU):
 
 ```bash
-docker compose up --build
+make up          # = docker compose up --build
+```
+
+Run on GPU (NVIDIA Container Toolkit required):
+
+```bash
+make gpu         # = docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
+```
+
+Models download to a persistent `hf_models` volume on first use, so they are
+downloaded once, not on every restart. To warm the cache up front (optional):
+
+```bash
+docker compose exec api python -m scripts.prefetch_models
 ```
 
 Services:
@@ -71,9 +92,10 @@ Services:
 - API health: `http://localhost:8000/health`
 - Metrics: `http://localhost:8000/metrics`
 
-Default API key:
+Default API key: `dev-api-key` (the web UI uses it automatically).
 
-- `dev-api-key`
+> Don't run `docker compose down -v` — the `-v` deletes the `hf_models` volume
+> and forces a full re-download.
 
 ## Local Development (without Docker)
 
@@ -123,16 +145,18 @@ celery -A workers.celery_app.celery worker -l INFO -Q translate
 ```bash
 cd frontend
 npm ci
-VITE_API_BASE_URL=http://localhost:8000 npm run dev
+VITE_API_BASE_URL=http://localhost:8000 VITE_API_KEY=dev-api-key npm run dev
 ```
 
 Frontend dev URL:
 
 - `http://localhost:5173`
 
-The UI requires sign-in (register or log in). On first sign-in it provisions an
-API key for you automatically; manage keys and view usage under **Account**. The
-translate view supports auto-detect and shows the real per-translation confidence.
+The UI is a plain translator — no login. It authenticates every request with the
+build-time `VITE_API_KEY` (defaults to `dev-api-key`). It supports auto-detect,
+streaming sentence-by-sentence output, language swap, copy, a light/dark theme,
+and a local history. The account/API-key/usage endpoints still exist on the
+backend (see below) but the UI doesn't surface them.
 
 ## API Overview
 
@@ -253,8 +277,10 @@ Main settings live in `app/settings.py` and can be overridden with env vars:
 - `API_KEY`
 - `DEVICE` (`auto` | `cpu` | `cuda`; `auto` uses the GPU if present, else CPU)
 - `TORCH_DTYPE` (`auto` | `float16` | `float32`; fp16 only applies on CUDA)
+- `DEFAULT_BEAM_SIZE` (beam width when a request omits one; `1` = greedy/fast, `4-5` = higher quality)
+- `WARMUP_PAIRS` (comma-separated pairs to preload on startup, e.g. `en:zh,zh:en`; empty = off)
 - `MAX_LOADED_MODELS` (LRU cap on resident HF models)
-- `HF_MODEL_CACHE`
+- `HF_MODEL_CACHE`, `HF_HOME` (model cache directory; back it with a volume to persist)
 - `REDIS_URL`
 - `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`
 - `DATABASE_URL`
@@ -298,8 +324,14 @@ The API and worker auto-detect CUDA and fall back to CPU when no GPU is present
 (`DEVICE=auto`). To reserve GPUs in Docker (requires the NVIDIA Container Toolkit):
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+make gpu   # = docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build -d
 ```
+
+The GPU overlay enables fp16, a higher beam width, and startup warmup
+(`WARMUP_PAIRS`) so the first request per model doesn't stall on load-to-VRAM.
+The image installs a CUDA 12.8 build of torch (the default PyPI aarch64 wheel is
+CUDA 13.0, too new for many drivers and would silently run on CPU). If your
+driver is newer/older, adjust the torch index URL in the `Dockerfile`.
 
 Benchmark throughput/latency (API must be running):
 
@@ -334,8 +366,10 @@ npm test
 
 ## Notes
 
-- Model downloads happen on first use and may take time.
+- Model downloads happen on first use and persist in the `hf_models` volume, so
+  it only happens once. The NLLB model (used for ja/ko) is ~600 MB.
 - Adding a Hugging Face access token (`HUGGINGFACE_HUB_TOKEN`) can improve authenticated model download reliability and may improve download speed.
 - A Hugging Face token does not make translation inference faster after models are loaded.
-- By default, API/worker run on CPU (`DEVICE=cpu`).
+- The base compose file runs on CPU (`DEVICE=cpu`); use `make gpu` for GPU.
+- The default beam width is `1` (greedy) for CPU speed; the GPU overlay raises it.
 - Redis cache keys include model and generation params, so changing options affects cache hits.
