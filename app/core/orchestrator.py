@@ -1,13 +1,13 @@
 import hashlib
 import time
-from typing import List, Tuple
+
 import structlog
 
+from app.core.policies import PolicyDecision, decide_sync_or_async
 from app.core.routing import resolve_model_path
-from app.core.policies import decide_sync_or_async, PolicyDecision
 from app.inference.engine import InferenceEngine
-from infra.cache import RedisCache
 from app.metrics import TRANSLATE_LATENCY
+from infra.cache import RedisCache
 
 log = structlog.get_logger()
 
@@ -30,18 +30,49 @@ class Orchestrator:
         self.engine = engine
         self.cache = cache
 
-    def decide(self, texts: List[str]) -> PolicyDecision:
+    def decide(self, texts: list[str]) -> PolicyDecision:
         return decide_sync_or_async(texts)
+
+    def translate_stream(
+        self,
+        source_lang: str,
+        target_lang: str,
+        text: str,
+        beam_size: int,
+        max_new_tokens: int,
+    ):
+        """Yield (index, sentence_translation) as each sentence completes.
+
+        Trades batch efficiency for progressive output: sentences are translated
+        one at a time (still using the sentence cache) so the UI can render as
+        results arrive. Multi-hop pivot routes run each sentence through all
+        stages before yielding.
+        """
+        model_path = resolve_model_path(source_lang, target_lang)
+        model_name = " -> ".join(model_path) if model_path else "identity"
+        sentences = self.engine.split_sentences(text)
+        for i, sentence in enumerate(sentences):
+            current = sentence
+            for stage_model in model_path:
+                current, _ = self.engine.translate_text(
+                    model_name=stage_model,
+                    text=current,
+                    beam_size=beam_size,
+                    max_new_tokens=max_new_tokens,
+                    split_long=False,
+                    cache=self.cache,
+                )
+            yield i, current.strip(), model_name
 
     def translate_sync(
         self,
         source_lang: str,
         target_lang: str,
-        texts: List[str],
+        texts: list[str],
         beam_size: int,
         max_new_tokens: int,
         split_long: bool,
-    ) -> Tuple[str, List[str], float, float]:
+    ) -> tuple[str, list[str], float, float]:
         model_path = resolve_model_path(source_lang, target_lang)
         model_name = " -> ".join(model_path) if model_path else "identity"
         route_key = "|".join(model_path) if model_path else "identity"
@@ -50,7 +81,7 @@ class Orchestrator:
         total_sentences = 0
         cache_hits = 0
 
-        outputs: List[str] = []
+        outputs: list[str] = []
         for t in texts:
             # sentence splitting happens inside engine for consistency,
             # but we cache at whole-text level too (cheap win).

@@ -1,5 +1,7 @@
 from dataclasses import dataclass
+
 from app.settings import settings
+
 
 @dataclass(frozen=True)
 class PolicyDecision:

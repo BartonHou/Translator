@@ -14,16 +14,25 @@ services:
   api:
     build: .
     container_name: translator_api
+    # Wait for Postgres to accept migrations (depends_on only waits for container
+    # start, not readiness), then apply migrations and serve.
+    command:
+      - "bash"
+      - "-lc"
+      - "until alembic upgrade head; do echo 'waiting for postgres...'; sleep 2; done && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
       APP_ENV: "prod"
       LOG_LEVEL: "INFO"
       DEVICE: "cpu"
       HF_MODEL_CACHE: "/models"
+      HF_HOME: "/models"
       REDIS_URL: "redis://redis:6379/0"
       CELERY_BROKER_URL: "redis://redis:6379/1"
       CELERY_RESULT_BACKEND: "redis://redis:6379/2"
       DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/translator"
       API_KEY: "dev-api-key"
+      JWT_SECRET: "change-me-in-production"
+      AUTO_CREATE_TABLES: "false"
       RATE_LIMIT_RPM: "60"
       CACHE_TTL_SECONDS: "86400"
     ports:
@@ -31,8 +40,10 @@ services:
     volumes:
       - hf_models:/models
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   worker:
     build: .
@@ -43,22 +54,31 @@ services:
       LOG_LEVEL: "INFO"
       DEVICE: "cpu"
       HF_MODEL_CACHE: "/models"
+      HF_HOME: "/models"
       REDIS_URL: "redis://redis:6379/0"
       CELERY_BROKER_URL: "redis://redis:6379/1"
       CELERY_RESULT_BACKEND: "redis://redis:6379/2"
       DATABASE_URL: "postgresql+psycopg2://postgres:postgres@postgres:5432/translator"
+      AUTO_CREATE_TABLES: "false"
       CACHE_TTL_SECONDS: "86400"
     volumes:
       - hf_models:/models
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   redis:
     image: redis:7
     container_name: translator_redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
     image: postgres:16
@@ -71,6 +91,11 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   hf_models:

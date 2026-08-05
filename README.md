@@ -123,20 +123,48 @@ celery -A workers.celery_app.celery worker -l INFO -Q translate
 ```bash
 cd frontend
 npm ci
-VITE_API_BASE_URL=http://localhost:8000 VITE_API_KEY=dev-api-key npm run dev
+VITE_API_BASE_URL=http://localhost:8000 npm run dev
 ```
 
 Frontend dev URL:
 
 - `http://localhost:5173`
 
+The UI requires sign-in (register or log in). On first sign-in it provisions an
+API key for you automatically; manage keys and view usage under **Account**. The
+translate view supports auto-detect and shows the real per-translation confidence.
+
 ## API Overview
 
-All protected endpoints require header:
+### Authentication
 
-```http
-X-API-Key: dev-api-key
+Two credential types (multi-tenant: keys and jobs are scoped per user):
+
+- **API keys** (programmatic) — send `X-API-Key: <key>`. Keys belong to a user,
+  carry their own rpm limit + monthly quota, and are stored only as hashes.
+- **JWT** (web UI) — register/login to get access + refresh tokens, sent as
+  `Authorization: Bearer <access_token>` for account endpoints.
+
+On first startup a seed admin user and the legacy `dev-api-key` are provisioned
+(`SEED_USER_EMAIL` / `SEED_USER_PASSWORD`), so `X-API-Key: dev-api-key` keeps working.
+
+```bash
+# Register (returns access + refresh tokens)
+curl -X POST http://localhost:8000/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"me@example.com","password":"password123"}'
+
+# Create an API key (returns the plaintext key exactly once)
+curl -X POST http://localhost:8000/v1/me/keys \
+  -H "Authorization: Bearer <access_token>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"prod","rpm_limit":120,"monthly_quota_chars":1000000}'
 ```
+
+Account endpoints: `GET /v1/me`, `GET/POST /v1/me/keys`, `DELETE /v1/me/keys/{id}`,
+`GET /v1/me/usage`. Auth endpoints: `POST /v1/auth/{register,login,refresh}`.
+
+Translation over quota returns `402`; over rate limit returns `429`.
 
 ### List supported models
 
@@ -162,6 +190,25 @@ curl -X POST http://localhost:8000/v1/translate \
 
 If request exceeds sync budget, API returns `413` and instructs using `/v1/jobs`.
 
+The response includes a per-translation `confidence` (length-ratio heuristic) and,
+when `source_lang` is `"auto"`, the `detected_source_lang`.
+
+- **Auto-detect**: set `"source_lang": "auto"` to detect the source language.
+- **Glossary**: pass `"options": {"glossary_id": "<id>"}` to force terminology
+  (create glossaries at `POST /v1/me/glossaries`).
+
+### Streaming translation (SSE)
+
+`POST /v1/translate/stream` returns `text/event-stream`, emitting one `data:`
+event per translated sentence and a final `event: done`, so clients render
+progressively:
+
+```bash
+curl -N -X POST http://localhost:8000/v1/translate/stream \
+  -H "X-API-Key: dev-api-key" -H "Content-Type: application/json" \
+  -d '{"source_lang":"en","target_lang":"es","text":"First sentence. Second one."}'
+```
+
 ### Asynchronous jobs
 
 - Create: `POST /v1/jobs`
@@ -177,8 +224,25 @@ curl -X POST http://localhost:8000/v1/jobs \
   -d '{
     "source_lang": "en",
     "target_lang": "fr",
-    "texts": ["First text", "Second text"]
+    "texts": ["First text", "Second text"],
+    "callback_url": "https://example.com/hook"
   }'
+```
+
+Pass an optional `callback_url` to receive an HMAC-signed `POST` on completion
+(header `X-Signature: sha256=...`, verify with `WEBHOOK_SECRET`).
+
+### File translation
+
+Upload a document (`.txt`, `.md`, `.srt`) for asynchronous translation; structure
+(blank lines, subtitle indices/timestamps) is preserved:
+
+```bash
+curl -X POST http://localhost:8000/v1/jobs/file \
+  -H "X-API-Key: dev-api-key" \
+  -F "source_lang=en" -F "target_lang=fr" -F "file=@subtitles.srt"
+# then, once SUCCEEDED:
+curl -OJ http://localhost:8000/v1/jobs/{job_id}/download -H "X-API-Key: dev-api-key"
 ```
 
 ## Configuration
@@ -187,21 +251,78 @@ Main settings live in `app/settings.py` and can be overridden with env vars:
 
 - `APP_ENV`, `LOG_LEVEL`
 - `API_KEY`
-- `DEVICE` (`cpu` or `cuda`)
+- `DEVICE` (`auto` | `cpu` | `cuda`; `auto` uses the GPU if present, else CPU)
+- `TORCH_DTYPE` (`auto` | `float16` | `float32`; fp16 only applies on CUDA)
+- `MAX_LOADED_MODELS` (LRU cap on resident HF models)
 - `HF_MODEL_CACHE`
 - `REDIS_URL`
 - `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`
 - `DATABASE_URL`
-- `RATE_LIMIT_RPM`
+- `RATE_LIMIT_RPM`, `RATE_LIMIT_FAIL_OPEN`
 - `CACHE_TTL_SECONDS`
 - `MAX_SYNC_CHARS`, `MAX_SYNC_TEXTS`, `MAX_JOB_TEXTS`
+- `ENABLE_DYNAMIC_BATCHING`, `BATCH_MAX_SIZE`, `BATCH_MAX_WAIT_MS` (opt-in cross-request batching)
+
+### Database migrations
+
+Schema is managed with Alembic. In Docker the API runs `alembic upgrade head`
+on start (`AUTO_CREATE_TABLES=false`). For local dev, tables auto-create on
+startup by default; to use migrations instead:
+
+```bash
+alembic upgrade head          # apply
+alembic revision --autogenerate -m "describe change"   # create a new migration
+```
+
+### Observability
+
+- `GET /health` — liveness (device/model info).
+- `GET /ready` — readiness; returns `503` if Redis or Postgres is unreachable.
+- `GET /metrics` — Prometheus metrics (request counts by route template, translate
+  latency, cache hit/miss/error, rate-limit blocks, quota-exceeded, model-load time, job counts).
+- Every response carries an `X-Request-ID` (inbound one is honored) and logs are correlated by it.
+
+Bring up Prometheus + Grafana:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
+# Grafana http://localhost:3000 (admin/admin), Prometheus http://localhost:9090
+```
+
+Rate limiting defaults to a **sliding window** (`RATE_LIMIT_STRATEGY=sliding`;
+`fixed` also available); limits are per API key using the key's `rpm_limit`.
+
+### GPU deployment
+
+The API and worker auto-detect CUDA and fall back to CPU when no GPU is present
+(`DEVICE=auto`). To reserve GPUs in Docker (requires the NVIDIA Container Toolkit):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+Benchmark throughput/latency (API must be running):
+
+```bash
+python scripts/bench.py --requests 200 --concurrency 16 --source en --target es
+```
 
 ## Testing
 
-Backend tests:
+Backend tests run under pytest. The suite stubs the heavy ML dependencies
+(torch/transformers/spacy), so it runs fast without a GPU or model downloads:
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+# or: make install && make test
+```
+
+Verify all registered HF models still exist on the Hub (network required):
+
+```bash
+python scripts/check_registry.py
 ```
 
 Frontend tests:

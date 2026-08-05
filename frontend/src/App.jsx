@@ -1,415 +1,180 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-const MOCK_TRANSLATIONS = [
-  {
-    id: "m-001",
-    from: "English",
-    to: "Spanish",
-    input: "The contract is ready for review.",
-    output: "El contrato está listo para revisión.",
-    confidence: 0.93
-  },
-  {
-    id: "m-002",
-    from: "English",
-    to: "Japanese",
-    input: "We will ship the update tomorrow.",
-    output: "明日アップデートを出荷します。",
-    confidence: 0.89
-  }
-];
-
-const MOCK_MODEL_REGISTRY = {
-  "en->es": "Helsinki-NLP/opus-mt-en-es",
-  "es->en": "Helsinki-NLP/opus-mt-es-en",
-  "en->de": "Helsinki-NLP/opus-mt-en-de",
-  "de->en": "Helsinki-NLP/opus-mt-de-en",
-  "en->it": "Helsinki-NLP/opus-mt-en-it",
-  "it->en": "Helsinki-NLP/opus-mt-it-en",
-  "en->pt": "Helsinki-NLP/opus-mt-en-pt",
-  "pt->en": "Helsinki-NLP/opus-mt-pt-en",
-  "en->ja": "Helsinki-NLP/opus-mt-en-jap",
-  "ja->en": "Helsinki-NLP/opus-mt-jap-en",
-  "en->ko": "Helsinki-NLP/opus-mt-en-ko",
-  "ko->en": "Helsinki-NLP/opus-mt-ko-en",
-  "en->fr": "Helsinki-NLP/opus-mt-en-fr",
-  "fr->en": "Helsinki-NLP/opus-mt-fr-en",
-  "en->zh": "Helsinki-NLP/opus-mt-en-zh",
-  "zh->en": "Helsinki-NLP/opus-mt-zh-en"
-};
-
-const DEFAULT_API_BASE =
-  import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
-const DEFAULT_API_KEY = import.meta.env.VITE_API_KEY ?? "dev-api-key";
+import { api } from "./api.js";
 
 const LANGUAGE_LABELS = {
-  en: "English",
-  es: "Spanish",
-  de: "German",
-  it: "Italian",
-  pt: "Portuguese",
-  ja: "Japanese",
-  ko: "Korean",
-  fr: "French",
-  zh: "Chinese"
+  en: "English", es: "Spanish", de: "German", it: "Italian",
+  pt: "Portuguese", ja: "Japanese", ko: "Korean", fr: "French", zh: "Chinese",
 };
+const RECENT_KEY = "tp_recent";
 
-const TONE_OPTIONS = [
-  "Neutral",
-  "Formal",
-  "Conversational",
-  "Technical"
-];
+function langLabel(code) {
+  return LANGUAGE_LABELS[code] ?? code;
+}
 
 export default function App() {
+  const [languages, setLanguages] = useState([]);
+  const [sourceLang, setSourceLang] = useState("auto");
+  const [targetLang, setTargetLang] = useState("zh");
   const [sourceText, setSourceText] = useState("");
-  const [sourceLang, setSourceLang] = useState("en");
-  const [targetLang, setTargetLang] = useState("fr");
-  const [tone, setTone] = useState("Neutral");
   const [output, setOutput] = useState("");
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [recent] = useState(MOCK_TRANSLATIONS);
-  const [apiError, setApiError] = useState("");
-  const [modelRegistry, setModelRegistry] = useState({});
-  const [supportedLanguages, setSupportedLanguages] = useState([]);
-  const [supportsPivot, setSupportsPivot] = useState(false);
-  const [lastMeta, setLastMeta] = useState(null);
-
-  const charCount = useMemo(() => sourceText.length, [sourceText]);
+  const [detected, setDetected] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [recent, setRecent] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const copyTimer = useRef(null);
 
   useEffect(() => {
-    let cancelled = false;
-    setApiError("");
-
-    async function loadModels() {
-      try {
-        const response = await fetch(`${DEFAULT_API_BASE}/v1/models`, {
-          headers: {
-            "X-API-Key": DEFAULT_API_KEY
-          }
-        });
-        if (!response.ok) {
-          const message = await response.text();
-          throw new Error(message || "Failed to load models.");
-        }
-        const payload = await response.json();
-        if (!cancelled) {
-          const registry =
-            Object.keys(payload.registry ?? {}).length > 0
-              ? payload.registry
-              : MOCK_MODEL_REGISTRY;
-          setModelRegistry(registry);
-          const pairs = Object.keys(registry)
-            .map((key) => key.split("->"))
-            .filter((parts) => parts.length === 2);
-          const derivedLanguages = Array.from(
-            new Set(pairs.flat())
-          );
-          const languages =
-            Array.isArray(payload.supported_languages) &&
-            payload.supported_languages.length > 0
-              ? payload.supported_languages
-              : derivedLanguages;
-          setSupportedLanguages(languages);
-          setSupportsPivot(Boolean(payload.supports_multi_to_multi_via_pivot));
-          if (pairs.length > 0) {
-            setSourceLang((current) =>
-              languages.includes(current) ? current : pairs[0][0]
-            );
-            setTargetLang((current) =>
-              languages.includes(current) ? current : pairs[0][1]
-            );
-          }
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setModelRegistry(MOCK_MODEL_REGISTRY);
-          const pairs = Object.keys(MOCK_MODEL_REGISTRY)
-            .map((key) => key.split("->"))
-            .filter((parts) => parts.length === 2);
-          setSupportedLanguages(Array.from(new Set(pairs.flat())));
-          setSupportsPivot(false);
-          setApiError(
-            error?.message || "Unable to reach the API. Check the base URL."
-          );
-        }
-      }
-    }
-
-    loadModels();
-    return () => {
-      cancelled = true;
-    };
+    api.models()
+      .then((data) => setLanguages(data.supported_languages || []))
+      .catch((e) => setError(e.message));
   }, []);
 
-  function handleSwap() {
+  const targetOptions = useMemo(
+    () => (sourceLang === "auto" ? languages : languages.filter((l) => l !== sourceLang)),
+    [languages, sourceLang],
+  );
+
+  function swap() {
+    if (sourceLang === "auto") return; // nothing concrete to swap to
     setSourceLang(targetLang);
     setTargetLang(sourceLang);
+    setSourceText(output);
+    setOutput(sourceText);
+    setDetected(null);
   }
 
-  async function handleTranslate(event) {
-    event.preventDefault();
-    setApiError("");
-    setIsTranslating(true);
-    setOutput("");
-    setLastMeta(null);
-
-    const payload = sourceText.trim();
-    if (!payload) {
-      setApiError("Please enter text to translate.");
-      setIsTranslating(false);
-      return;
-    }
-
+  async function copyOutput() {
+    if (!output) return;
     try {
-      const response = await fetch(`${DEFAULT_API_BASE}/v1/translate`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": DEFAULT_API_KEY
-        },
-        body: JSON.stringify({
-          source_lang: sourceLang,
-          target_lang: targetLang,
-          texts: [payload],
-          options: {
-            beam_size: 4,
-            max_new_tokens: 256,
-            split_long: true
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const message = await response.text();
-        throw new Error(message || "Translation failed.");
-      }
-
-      const data = await response.json();
-      setOutput(data.translations?.[0] ?? "");
-      setLastMeta({
-        model: data.model,
-        latencyMs: data.latency_ms,
-        cacheHitRate: data.cache_hit_rate
-      });
-    } catch (error) {
-      setApiError(error?.message || "Translation failed.");
-    } finally {
-      setIsTranslating(false);
+      await navigator.clipboard.writeText(output);
+      setCopied(true);
+      clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked; ignore */
     }
   }
 
-  const registryEntries = Object.entries(modelRegistry);
-  const modelLabel =
-    lastMeta?.model ||
-    registryEntries[0]?.[1] ||
-    "Atlas-Translate v2";
-
-  const supportedPairs = registryEntries
-    .map(([pair]) => pair.split("->"))
-    .filter((parts) => parts.length === 2);
-  const sourceOptions = Array.from(
-    new Set(
-      supportedLanguages.length > 0
-        ? supportedLanguages
-        : supportedPairs.map(([src]) => src)
-    )
-  );
-  const targetOptions = supportsPivot
-    ? sourceOptions.filter((code) => code !== sourceLang)
-    : Array.from(
-        new Set(
-          supportedPairs
-            .filter(([src]) => src === sourceLang)
-            .map(([, tgt]) => tgt)
-        )
-      );
-
-  useEffect(() => {
-    if (sourceOptions.length > 0 && !sourceOptions.includes(sourceLang)) {
-      setSourceLang(sourceOptions[0]);
+  async function translate(e) {
+    e.preventDefault();
+    setError("");
+    setDetected(null);
+    if (!sourceText.trim()) {
+      setError("Please enter some text to translate.");
       return;
     }
-    if (targetOptions.length === 0 && supportedPairs.length > 0) {
-      const fallback = supportedPairs.find(([src]) => src === sourceLang);
-      if (fallback) {
-        setTargetLang(fallback[1]);
-      }
-    } else if (targetOptions.length > 0 && !targetOptions.includes(targetLang)) {
-      setTargetLang(targetOptions[0]);
+    setBusy(true);
+    try {
+      const data = await api.translate({
+        source_lang: sourceLang,
+        target_lang: targetLang,
+        texts: [sourceText.trim()],
+      });
+      const translated = data.translations?.[0] ?? "";
+      setOutput(translated);
+      setDetected(data.detected_source_lang || null);
+
+      const entry = {
+        id: `${Date.now()}`,
+        from: data.detected_source_lang || sourceLang,
+        to: targetLang,
+        input: sourceText.trim(),
+        output: translated,
+      };
+      const next = [entry, ...recent].slice(0, 6);
+      setRecent(next);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+    } catch (err) {
+      setError(err.message || "Translation failed.");
+    } finally {
+      setBusy(false);
     }
-  }, [sourceLang, targetLang, sourceOptions, supportedPairs, targetOptions]);
+  }
+
+  function clearRecent() {
+    setRecent([]);
+    localStorage.removeItem(RECENT_KEY);
+  }
 
   return (
     <div className="page">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">Translator Platform</p>
-          <h1>Precision translation, shaped by your context.</h1>
-          <p className="subtitle">
-            Run a single translation request with clear tone controls and a
-            confidence preview.
-          </p>
-        </div>
-        <div className="hero-card">
-          <div>
-            <p className="hero-label">Model</p>
-            <p className="hero-value">{modelLabel}</p>
-          </div>
-          <div>
-            <p className="hero-label">Latency</p>
-            <p className="hero-value">
-              {lastMeta?.latencyMs ? `${Math.round(lastMeta.latencyMs)} ms` : "—"}
-            </p>
-          </div>
-          <div>
-            <p className="hero-label">Queue</p>
-            <p className="hero-value">0 pending</p>
-          </div>
+      <header className="topbar">
+        <h1>Translator</h1>
+        <div className="lang-bar">
+          <select aria-label="Source language" value={sourceLang}
+                  onChange={(e) => setSourceLang(e.target.value)}>
+            <option value="auto">Detect language</option>
+            {languages.map((c) => (
+              <option key={c} value={c}>{langLabel(c)}</option>
+            ))}
+          </select>
+          <button type="button" className="swap" onClick={swap}
+                  disabled={sourceLang === "auto"} title="Swap languages"
+                  aria-label="Swap languages">⇄</button>
+          <select aria-label="Target language" value={targetLang}
+                  onChange={(e) => setTargetLang(e.target.value)}>
+            {targetOptions.map((c) => (
+              <option key={c} value={c}>{langLabel(c)}</option>
+            ))}
+          </select>
         </div>
       </header>
 
-      <main className="grid">
-        <section className="panel translate">
-          <form onSubmit={handleTranslate}>
-            <div className="panel-header">
-              <div>
-                <h2>Translation Request</h2>
-                <p className="muted">
-                  Provide the source text, choose the output language, and define
-                  the tone.
-                </p>
-              </div>
-              <button
-                className="ghost"
-                type="button"
-                onClick={handleSwap}
-                aria-label="Swap source and target languages"
-              >
-                Swap
-              </button>
-            </div>
-
-            <div className="field-row">
-              <label>
-                Source language
-                <select
-                  value={sourceLang}
-                  onChange={(event) => setSourceLang(event.target.value)}
-                >
-                  {sourceOptions.map((code) => (
-                    <option key={code} value={code}>
-                      {LANGUAGE_LABELS[code] ?? code}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Target language
-                <select
-                  value={targetLang}
-                  onChange={(event) => setTargetLang(event.target.value)}
-                >
-                  {targetOptions.map((code) => (
-                    <option key={code} value={code}>
-                      {LANGUAGE_LABELS[code] ?? code}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <label>
-              Tone
-              <div className="tone-row">
-                {TONE_OPTIONS.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    className={
-                      option === tone ? "chip chip-active" : "chip"
-                    }
-                    onClick={() => setTone(option)}
-                  >
-                    {option}
-                  </button>
-                ))}
-              </div>
-            </label>
-
-            <label className="textarea">
-              Source text
-              <textarea
-                placeholder="Paste or draft the content to translate..."
-                value={sourceText}
-                onChange={(event) => setSourceText(event.target.value)}
-                rows={7}
-              />
-              <span className="meta">{charCount} characters</span>
-            </label>
-
-            {apiError ? <p className="error">{apiError}</p> : null}
-
-            <button className="primary" type="submit">
-              {isTranslating ? "Translating…" : "Translate"}
+      <form className="editor" onSubmit={translate}>
+        <div className="pane">
+          <textarea value={sourceText} autoFocus
+                    placeholder="Enter text…"
+                    onChange={(e) => setSourceText(e.target.value)} />
+          <div className="pane-foot">
+            <span className="count">{sourceText.length}</span>
+            <button className="primary" type="submit" disabled={busy}>
+              {busy ? "Translating…" : "Translate"}
             </button>
-          </form>
+          </div>
+        </div>
+
+        <div className="pane pane-out">
+          <div className="output">
+            {output || <span className="placeholder">Translation appears here</span>}
+          </div>
+          <div className="pane-foot">
+            <span className="count">
+              {sourceLang === "auto" && detected ? `Detected: ${langLabel(detected)}` : " "}
+            </span>
+            <button type="button" className="ghost" onClick={copyOutput} disabled={!output}>
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+        </div>
+      </form>
+
+      {error ? <p className="error">{error}</p> : null}
+
+      {recent.length > 0 ? (
+        <section className="recent">
+          <div className="recent-head">
+            <h2>History</h2>
+            <button type="button" className="link" onClick={clearRecent}>Clear</button>
+          </div>
+          <ul>
+            {recent.map((item) => (
+              <li key={item.id}>
+                <span className="pair">{langLabel(item.from)} → {langLabel(item.to)}</span>
+                <span className="in">{item.input}</span>
+                <span className="out">{item.output}</span>
+              </li>
+            ))}
+          </ul>
         </section>
-
-        <section className="panel output">
-          <div className="panel-header">
-            <div>
-              <h2>Output</h2>
-              <p className="muted">Translation response and confidence preview.</p>
-            </div>
-            <span className="badge">Preview</span>
-          </div>
-
-          <div className="output-box">
-            <p className={output ? "output-text" : "output-placeholder"}>
-              {output || "Run a translation to see the preview here."}
-            </p>
-          </div>
-
-          <div className="confidence">
-            <div>
-              <p className="muted">Cache Hit Rate</p>
-              <p className="confidence-value">
-                {lastMeta?.cacheHitRate
-                  ? `${Math.round(lastMeta.cacheHitRate * 100)}%`
-                  : "—"}
-              </p>
-            </div>
-            <div className="confidence-bar">
-              <span
-                style={{
-                  width: lastMeta?.cacheHitRate
-                    ? `${Math.round(lastMeta.cacheHitRate * 100)}%`
-                    : "0%"
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="recent">
-            <h3>Recent Translations</h3>
-            <div className="recent-list">
-              {recent.map((item) => (
-                <article key={item.id}>
-                  <header>
-                    <p>
-                      {item.from} → {item.to}
-                    </p>
-                    <span>{item.confidence.toFixed(2)}</span>
-                  </header>
-                  <p className="recent-input">{item.input}</p>
-                  <p className="recent-output">{item.output}</p>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-      </main>
+      ) : null}
     </div>
   );
 }

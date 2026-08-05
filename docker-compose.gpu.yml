@@ -1,0 +1,35 @@
+# GPU overlay. Use together with the base compose file:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# Requires the NVIDIA Container Toolkit on the host. The api/worker fall back to
+# CPU automatically if no GPU is visible (DEVICE=auto), so this file only adds
+# the GPU reservation and flips the device hint.
+services:
+  api:
+    environment:
+      DEVICE: "auto"
+      TORCH_DTYPE: "float16"
+      DEFAULT_BEAM_SIZE: "5"
+      # Preload these pairs into VRAM on startup so the first request is fast.
+      # en:ko warms the shared NLLB model too (used for all ja/ko pairs).
+      WARMUP_PAIRS: "en:zh,zh:en,en:ko"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  worker:
+    environment:
+      DEVICE: "auto"
+      TORCH_DTYPE: "float16"
+      DEFAULT_BEAM_SIZE: "5"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

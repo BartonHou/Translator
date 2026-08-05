@@ -1,131 +1,100 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import App from "./App.jsx";
 
-describe("App", () => {
-  it("renders model info from registry", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ registry: { "en->es": "test-model" } }),
-      text: async () => ""
+// Route the mocked fetch by path + method so tests read declaratively.
+function mockApi(routes) {
+  global.fetch = vi.fn(async (url, opts = {}) => {
+    const method = opts.method || "GET";
+    const path = new URL(url, "http://x").pathname;
+    const key = `${method} ${path}`;
+    const handler = routes[key];
+    if (!handler) throw new Error(`unexpected request: ${key}`);
+    const { status = 200, body = {} } = handler(opts);
+    return {
+      ok: status < 400,
+      status,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    };
+  });
+}
+
+const MODELS = {
+  supported_languages: ["en", "es", "de", "fr", "zh"],
+  pairs: [{ source: "en", target: "zh", via_pivot: false }],
+};
+
+beforeEach(() => {
+  localStorage.clear();
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe("Translator", () => {
+  it("opens straight into the translator (no login gate)", async () => {
+    mockApi({ "GET /v1/models": () => ({ body: MODELS }) });
+    render(<App />);
+    expect(screen.getByRole("heading", { name: "Translator" })).toBeInTheDocument();
+    expect(await screen.findByPlaceholderText("Enter text…")).toBeInTheDocument();
+  });
+
+  it("renders detect option and supported languages", async () => {
+    mockApi({ "GET /v1/models": () => ({ body: MODELS }) });
+    render(<App />);
+    const source = await screen.findByLabelText("Source language");
+    const values = Array.from(source.querySelectorAll("option")).map((o) => o.value);
+    expect(values).toContain("auto");
+    expect(values).toContain("en");
+  });
+
+  it("translates and shows the result", async () => {
+    mockApi({
+      "GET /v1/models": () => ({ body: MODELS }),
+      "POST /v1/translate": () => ({
+        body: {
+          model: "Helsinki-NLP/opus-mt-en-zh",
+          translations: ["你好"],
+          latency_ms: 12.4,
+          cache_hit_rate: 0,
+          detected_source_lang: "en",
+          confidence: [0.91],
+        },
+      }),
     });
 
     render(<App />);
-
-    expect(await screen.findByText("test-model")).toBeInTheDocument();
-  });
-
-  it("submits a translation and renders output", async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ registry: { "en->es": "test-model" } }),
-        text: async () => ""
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          model: "test-model",
-          translations: ["Hola mundo"],
-          latency_ms: 12.4,
-          cache_hit_rate: 0.75
-        }),
-        text: async () => ""
-      });
-
-    render(<App />);
-
-    const textarea = await screen.findByPlaceholderText(
-      "Paste or draft the content to translate..."
-    );
-    await userEvent.type(textarea, "Hello world");
-
+    const textarea = await screen.findByPlaceholderText("Enter text…");
+    await userEvent.type(textarea, "Hello");
     await userEvent.click(screen.getByRole("button", { name: "Translate" }));
 
-    expect(await screen.findByText("Hola mundo")).toBeInTheDocument();
-    expect(await screen.findByText("75%")).toBeInTheDocument();
+    expect((await screen.findAllByText("你好")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("Detected: English")).toBeInTheDocument();
+  });
+
+  it("stores translation in localStorage recent history", async () => {
+    mockApi({
+      "GET /v1/models": () => ({ body: MODELS }),
+      "POST /v1/translate": () => ({
+        body: { model: "m", translations: ["你好"], latency_ms: 1, cache_hit_rate: 0, confidence: [0.8] },
+      }),
+    });
+    render(<App />);
+    const textarea = await screen.findByPlaceholderText("Enter text…");
+    await userEvent.type(textarea, "Hello");
+    await userEvent.click(screen.getByRole("button", { name: "Translate" }));
 
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  it("limits target languages to supported pairs", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        registry: {
-          "en->fr": "model-a",
-          "fr->en": "model-b",
-          "en->zh": "model-c"
-        }
-      }),
-      text: async () => ""
+      const recent = JSON.parse(localStorage.getItem("tp_recent") || "[]");
+      expect(recent.length).toBe(1);
+      expect(recent[0].output).toBe("你好");
     });
 
-    render(<App />);
-
-    const sourceSelect = await screen.findByLabelText("Source language");
-    const targetSelect = await screen.findByLabelText("Target language");
-
-    expect(targetSelect).toHaveValue("fr");
-
-    await userEvent.selectOptions(sourceSelect, "fr");
-    expect(targetSelect).toHaveValue("en");
-
-    await userEvent.selectOptions(sourceSelect, "en");
-    expect(targetSelect).toHaveValue("fr");
-  });
-
-  it("renders only supported source options", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        registry: {
-          "zh->en": "model-a",
-          "en->zh": "model-b"
-        }
-      }),
-      text: async () => ""
-    });
-
-    render(<App />);
-
-    const sourceSelect = await screen.findByLabelText("Source language");
-    expect(sourceSelect).toBeInTheDocument();
-    const options = Array.from(sourceSelect.querySelectorAll("option")).map(
-      (opt) => opt.value
-    );
-    expect(options.sort()).toEqual(["en", "zh"]);
-  });
-
-  it("allows multi-to-multi target selection when pivot mode is enabled", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        registry: {
-          "en->es": "model-a",
-          "es->en": "model-b",
-          "en->de": "model-c",
-          "de->en": "model-d"
-        },
-        supported_languages: ["en", "es", "de"],
-        supports_multi_to_multi_via_pivot: true
-      }),
-      text: async () => ""
-    });
-
-    render(<App />);
-
-    const sourceSelect = await screen.findByLabelText("Source language");
-    const targetSelect = await screen.findByLabelText("Target language");
-
-    await userEvent.selectOptions(sourceSelect, "es");
-    const options = Array.from(targetSelect.querySelectorAll("option")).map(
-      (opt) => opt.value
-    );
-    expect(options.sort()).toEqual(["de", "en"]);
+    // And it appears in the history section.
+    const history = screen.getByRole("heading", { name: "History" }).closest("section");
+    expect(within(history).getByText("你好")).toBeInTheDocument();
   });
 });

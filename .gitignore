@@ -44,3 +44,6 @@ frontend/coverage/
 # OS files
 .DS_Store
 Thumbs.db
+
+# local sqlite scratch
+*.db

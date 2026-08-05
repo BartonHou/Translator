@@ -1,7 +1,8 @@
 import unittest
+
 from pydantic import ValidationError
 
-from domain.schemas import TranslateRequest, TranslateOptions, TranslateResponse
+from domain.schemas import TranslateOptions, TranslateRequest, TranslateResponse
 
 
 class TranslateSchemaTests(unittest.TestCase):

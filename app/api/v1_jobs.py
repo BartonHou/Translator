@@ -1,35 +1,47 @@
 import json
-from datetime import datetime
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from sqlalchemy.orm import Session
-import structlog
 
-from app.settings import settings
-from domain.schemas import JobCreateRequest, JobStatusResponse, JobResultResponse
-from domain.models import TranslationJob
-from infra.db import get_db
-from infra.redis_client import get_redis
-from infra.rate_limit import enforce_rate_limit
-from app.metrics import REQ_COUNT, JOBS_CREATED
+import structlog
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from app.api.deps import get_api_key_context, get_redis
 from app.core.routing import resolve_model_path
+from app.metrics import JOBS_CREATED
+from app.settings import settings
+from domain.models import ApiKey, TranslationJob
+from domain.schemas import JobCreateRequest, JobResultResponse, JobStatusResponse
+from infra.db import get_db
+from infra.rate_limit import enforce_rate_limit
 from workers.tasks import translate_job_async
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/v1", tags=["jobs"])
 
-def require_api_key(x_api_key: str | None = Header(default=None)):
-    if x_api_key != settings.api_key:
-        raise HTTPException(status_code=401, detail="invalid api key")
-    return x_api_key
+
+def _owned_job_or_404(db: Session, job_id: str, key: ApiKey) -> TranslationJob:
+    """Fetch a job, enforcing tenant isolation: a key can only see jobs owned by
+    keys of the same user. Returns 404 (not 403) so job existence isn't leaked."""
+    job = db.get(TranslationJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.api_key_id is not None:
+        owner = db.get(ApiKey, job.api_key_id)
+        if owner is None or owner.user_id != key.user_id:
+            raise HTTPException(status_code=404, detail="job not found")
+    return job
+
 
 @router.post("/jobs")
-def create_job(req: JobCreateRequest, api_key: str = Depends(require_api_key), db: Session = Depends(get_db)):
-    r = get_redis()
+def create_job(
+    req: JobCreateRequest,
+    key: ApiKey = Depends(get_api_key_context),
+    db: Session = Depends(get_db),
+    r=Depends(get_redis),
+):
     try:
-        enforce_rate_limit(r, api_key=api_key, rpm=settings.rate_limit_rpm)
+        enforce_rate_limit(r, api_key=key.id, rpm=key.rpm_limit)
     except PermissionError:
-        REQ_COUNT.labels(path="/v1/jobs", method="POST", status="429").inc()
-        raise HTTPException(status_code=429, detail="rate limit exceeded")
+        raise HTTPException(status_code=429, detail="rate limit exceeded") from None
 
     if len(req.texts) > settings.max_job_texts:
         raise HTTPException(status_code=413, detail=f"too many texts (> {settings.max_job_texts})")
@@ -37,20 +49,16 @@ def create_job(req: JobCreateRequest, api_key: str = Depends(require_api_key), d
     try:
         resolve_model_path(req.source_lang, req.target_lang)
     except ValueError as e:
-        REQ_COUNT.labels(path="/v1/jobs", method="POST", status="400").inc()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
     job = TranslationJob(
         status="PENDING",
+        api_key_id=key.id,
         source_lang=req.source_lang,
         target_lang=req.target_lang,
         request_texts=json.dumps(req.texts, ensure_ascii=False),
-        model_name=None,
-        response_texts=None,
-        latency_ms=None,
-        error_message=None,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        chars_in=sum(len(t) for t in req.texts),
+        callback_url=req.callback_url,
     )
     db.add(job)
     db.commit()
@@ -70,15 +78,16 @@ def create_job(req: JobCreateRequest, api_key: str = Depends(require_api_key), d
     )
 
     JOBS_CREATED.inc()
-    REQ_COUNT.labels(path="/v1/jobs", method="POST", status="200").inc()
     return {"job_id": job.job_id, "status": job.status}
 
-@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
-def get_job_status(job_id: str, api_key: str = Depends(require_api_key), db: Session = Depends(get_db)):
-    job = db.get(TranslationJob, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="job not found")
 
+@router.get("/jobs/{job_id}", response_model=JobStatusResponse)
+def get_job_status(
+    job_id: str,
+    key: ApiKey = Depends(get_api_key_context),
+    db: Session = Depends(get_db),
+):
+    job = _owned_job_or_404(db, job_id, key)
     return JobStatusResponse(
         job_id=job.job_id,
         status=job.status,  # type: ignore
@@ -88,12 +97,14 @@ def get_job_status(job_id: str, api_key: str = Depends(require_api_key), db: Ses
         error_message=job.error_message,
     )
 
-@router.get("/jobs/{job_id}/result", response_model=JobResultResponse)
-def get_job_result(job_id: str, api_key: str = Depends(require_api_key), db: Session = Depends(get_db)):
-    job = db.get(TranslationJob, job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="job not found")
 
+@router.get("/jobs/{job_id}/result", response_model=JobResultResponse)
+def get_job_result(
+    job_id: str,
+    key: ApiKey = Depends(get_api_key_context),
+    db: Session = Depends(get_db),
+):
+    job = _owned_job_or_404(db, job_id, key)
     translations = None
     if job.response_texts:
         translations = json.loads(job.response_texts)

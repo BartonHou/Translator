@@ -1,7 +1,7 @@
 import hashlib
-from typing import Tuple, List
-import structlog
+
 import spacy
+import structlog
 
 from app.inference.model_manager import ModelManager
 from infra.cache import RedisCache
@@ -33,6 +33,10 @@ class InferenceEngine:
         sents = [s.text.strip() for s in doc.sents if s.text.strip()]
         return sents if sents else [text.strip()]
 
+    def split_sentences(self, text: str) -> list[str]:
+        """Public sentence splitter (used by streaming translation)."""
+        return self._split_sentences(" ".join(text.strip().split()))
+
     def translate_text(
         self,
         model_name: str,
@@ -41,7 +45,7 @@ class InferenceEngine:
         max_new_tokens: int,
         split_long: bool,
         cache: RedisCache,
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         pipe = self.mm.get_pipeline(model_name)
 
         text_norm = " ".join(text.strip().split())
@@ -72,8 +76,14 @@ class InferenceEngine:
                 num_beams=beam_size,
                 max_new_tokens=max_new_tokens,
             )
-            for src, r in zip(uniq, results):
-                out = r.get("translation_text") or r.get("generated_text")
+            for src, r in zip(uniq, results, strict=True):
+                # Distinguish a missing key (real error) from an empty string (a
+                # valid, if poor, model output). Collapsing "" to None here used
+                # to raise and 500 the whole request; instead keep the empty
+                # segment so the rest of the translation still returns.
+                out = r.get("translation_text")
+                if out is None:
+                    out = r.get("generated_text")
                 if out is None:
                     raise ValueError("pipeline output missing translation/generated text")
                 translated_lookup[src] = out.strip()
@@ -85,7 +95,7 @@ class InferenceEngine:
 
         # Reconstruct in original order
         out_sents: list[str] = []
-        for s, k in zip(sents, sent_keys):
+        for s, k in zip(sents, sent_keys, strict=True):
             if k in cached_map:
                 out_sents.append(cached_map[k])
             else:
