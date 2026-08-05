@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     # Security
     api_key: str = "dev-api-key"  # seed key, provisioned to a seed user on startup
 
+    # Extra CORS origins (comma-separated), added to the built-in localhost ones.
+    # Set this to your deployed frontend origin, e.g. "https://user.github.io".
+    cors_origins: str = ""
+
     # Auth (JWT for the web UI)
     jwt_secret: str = "dev-insecure-secret-change-me-in-production-0123456789"
     jwt_algorithm: str = "HS256"
@@ -43,6 +47,10 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://localhost:6379/0"
+    # Use an in-process fake Redis instead of a real server. For single-container
+    # deploys with no Redis available (e.g. a HuggingFace Gradio Space). Cache and
+    # rate limiting still work, but only within one process and non-persistent.
+    use_fake_redis: bool = False
 
     # Celery
     celery_broker_url: str = "redis://localhost:6379/1"

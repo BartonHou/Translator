@@ -1,0 +1,55 @@
+name: Deploy frontend to GitHub Pages
+
+# Publishes the React frontend to GitHub Pages. It talks to the backend Space
+# whose URL you set in the repo variable API_BASE_URL
+# (Settings -> Secrets and variables -> Actions -> Variables).
+
+on:
+  push:
+    branches: [master]
+    paths: ["frontend/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; don't cancel an in-progress run.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - name: Build
+        env:
+          # Backend Space URL, e.g. https://bartonhou-translator-api.hf.space
+          VITE_API_BASE_URL: ${{ vars.API_BASE_URL }}
+          VITE_API_KEY: dev-api-key
+        # Base path must match the repo name for project Pages
+        # (https://<user>.github.io/Translator/).
+        run: npm run build -- --base=/Translator/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
