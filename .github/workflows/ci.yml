@@ -14,12 +14,19 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install test deps
-        # Only the light deps needed to run the suite; ML deps are stubbed in tests.
+        # Install every runtime dep from pyproject EXCEPT the heavy ML packages,
+        # which the suite stubs (see tests/conftest.py). Deriving the list from
+        # pyproject keeps CI in sync automatically as new light deps are added,
+        # instead of a hand-maintained list that silently drifts.
         run: |
           python -m pip install --upgrade pip
-          pip install fastapi "pydantic>=2.6" "pydantic-settings>=2.2" \
-            "sqlalchemy>=2.0" "redis>=5.0" "celery>=5.3" structlog \
-            prometheus-client httpx pytest fakeredis ruff
+          python - <<'EOF'
+          import pathlib, subprocess, sys, tomllib
+          deps = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["dependencies"]
+          heavy = ("torch", "transformers", "spacy", "sentencepiece")
+          light = [d for d in deps if not d.lower().startswith(heavy)]
+          subprocess.check_call([sys.executable, "-m", "pip", "install", *light, "pytest", "fakeredis", "ruff"])
+          EOF
       - name: Lint
         run: ruff check .
       - name: Test
