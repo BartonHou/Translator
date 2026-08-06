@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { api } from "./api.js";
+import { SUPPORTED_LANGUAGES, api } from "./api.js";
 
 // Native-script names so each language reads naturally in its own script.
 const LANGUAGE_LABELS = {
@@ -22,7 +22,7 @@ function initialTheme() {
 }
 
 export default function App() {
-  const [languages, setLanguages] = useState([]);
+  const languages = SUPPORTED_LANGUAGES;
   const [sourceLang, setSourceLang] = useState("auto");
   const [targetLang, setTargetLang] = useState("zh");
   const [sourceText, setSourceText] = useState("");
@@ -45,12 +45,6 @@ export default function App() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
-
-  useEffect(() => {
-    api.models()
-      .then((data) => setLanguages(data.supported_languages || []))
-      .catch((e) => setError(e.message));
-  }, []);
 
   const targetOptions = useMemo(
     () => (sourceLang === "auto" ? languages : languages.filter((l) => l !== sourceLang)),
@@ -94,34 +88,24 @@ export default function App() {
       return;
     }
     setBusy(true);
-    const parts = [];
-    const join = () => parts.filter((x) => x != null).join(" ");
     try {
-      await api.translateStream(
-        { source_lang: sourceLang, target_lang: targetLang, text },
-        {
-          onMeta: (m) => m.detected_source_lang && setDetected(m.detected_source_lang),
-          onSentence: (s) => {
-            parts[s.index] = s.text;
-            setOutput(join()); // progressive render as sentences arrive
-          },
-          onDone: () => {
-            const finalOut = join();
-            const entry = {
-              id: `${Date.now()}`,
-              from: detected || sourceLang,
-              to: targetLang,
-              input: text,
-              output: finalOut,
-            };
-            setRecent((prev) => {
-              const next = [entry, ...prev].slice(0, 6);
-              localStorage.setItem(RECENT_KEY, JSON.stringify(next));
-              return next;
-            });
-          },
-        },
-      );
+      const { translation, detected: det } = await api.translate({
+        text, source_lang: sourceLang, target_lang: targetLang,
+      });
+      setOutput(translation);
+      setDetected(det);
+      const entry = {
+        id: `${Date.now()}`,
+        from: det || sourceLang,
+        to: targetLang,
+        input: text,
+        output: translation,
+      };
+      setRecent((prev) => {
+        const next = [entry, ...prev].slice(0, 6);
+        localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+        return next;
+      });
     } catch (err) {
       setError(err.message || "Translation failed.");
     } finally {

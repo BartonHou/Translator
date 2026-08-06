@@ -10,28 +10,14 @@ python_version: "3.11"
 pinned: false
 ---
 
-# Translator API (demo backend)
+# Translator API (ZeroGPU backend)
 
-FastAPI translation backend for the
-[Translator](https://github.com/BartonHou/Translator) project, running as a free
-HuggingFace **Gradio** Space (CPU, SQLite, in-process fake Redis — no external
-services). It serves the GitHub Pages frontend.
+Self-contained translation backend for the
+[Translator](https://github.com/BartonHou/Translator) web frontend. Runs on free
+**ZeroGPU** hardware (set it in Settings → Hardware). opus-mt for European
+languages + Chinese, NLLB for Japanese/Korean.
 
-- Info page: `/ui`
-- Health: `/health`
-- Docs: `/docs`
-- Translate: `POST /v1/translate` with header `X-API-Key: dev-api-key`
-
-## Required Space variables
-
-Set these under **Settings → Variables and secrets** (Variables, not secrets):
-
-| Name | Value |
-| --- | --- |
-| `USE_FAKE_REDIS` | `true` |
-| `DATABASE_URL` | `sqlite:////tmp/app.db` |
-| `AUTO_CREATE_TABLES` | `true` |
-| `HF_HOME` | `/tmp/models` |
-| `DEVICE` | `cpu` |
-| `CORS_ORIGINS` | `https://bartonhou.github.io` |
-| `API_KEY` | `dev-api-key` |
+The frontend calls `POST /api/translate` (plain JSON, CORS-enabled). The default
+allowed origin is `https://bartonhou.github.io`; override with a `CORS_ORIGINS`
+Space variable if your frontend lives elsewhere. Set the Space hardware to
+**ZeroGPU** (Settings → Hardware). Models download to the Space cache on first use.

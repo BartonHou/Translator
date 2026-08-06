@@ -1,8 +1,8 @@
-# HuggingFace Gradio Space dependencies.
-# CPU-only torch (the Space has no GPU); the rest come from the app package,
-# installed straight from GitHub. gradio + fakeredis are Space-only extras.
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.8.0+cpu
-git+https://github.com/BartonHou/Translator.git@master
-gradio
-fakeredis
+# HuggingFace ZeroGPU Space dependencies.
+# torch + gradio come from the ZeroGPU base image / sdk_version — don't pin them.
+spaces
+transformers
+sentencepiece
+langdetect
+fastapi
+uvicorn
