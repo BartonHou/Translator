@@ -4,19 +4,21 @@ ZeroGPU gives a free shared GPU, but only *inside* functions decorated with
 ``@spaces.GPU``. So models load on CPU and generation runs on the GPU inside
 ``_translate_gpu``; if ZeroGPU doesn't hook the call, it degrades to CPU.
 
-Gradio's own API doesn't send permissive CORS headers, so instead of calling
-``/gradio_api`` we expose our own FastAPI ``POST /api/translate`` with a CORS
-allow-list (the GitHub Pages origin). A small Gradio UI is mounted at ``/ui`` so
-this still qualifies as a Gradio Space (required for free ZeroGPU).
+HF Spaces launch a Gradio app with ``demo.launch()`` (running uvicorn ourselves
+double-binds the port). Gradio's own API sends no CORS headers, so we inject our
+own ``POST /api/translate`` route + a CORS allow-list into Gradio's FastAPI app
+by wrapping ``gradio.routes.App.create_app``. The React site on GitHub Pages
+calls that endpoint.
 """
 import os
 
 import gradio as gr
+import gradio.routes
 import spaces
 import torch
-import uvicorn
-from fastapi import FastAPI
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from langdetect import detect as _ld_detect
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
@@ -128,32 +130,38 @@ def translate(text: str, source_lang: str, target_lang: str):
     return _translate_gpu(text, path), detected
 
 
-# --- FastAPI (own CORS) + mounted Gradio UI --------------------------------
+# --- inject our REST endpoint + CORS into Gradio's FastAPI app -------------
 _origins = [o.strip() for o in os.environ.get(
     "CORS_ORIGINS", "https://bartonhou.github.io").split(",") if o.strip()]
-
-api = FastAPI()
-api.add_middleware(
-    CORSMiddleware, allow_origins=_origins,
-    allow_methods=["*"], allow_headers=["*"],
-)
+_orig_create_app = gradio.routes.App.create_app
 
 
-@api.get("/health")
-def health():
-    return {"status": "ok", "cuda": torch.cuda.is_available()}
-
-
-@api.post("/api/translate")
-def api_translate(body: dict):
-    translation, detected = translate(
-        body.get("text", ""), body.get("source_lang", "auto"), body.get("target_lang", "en"),
+def _create_app(*args, **kwargs):
+    app = _orig_create_app(*args, **kwargs)
+    app.add_middleware(
+        CORSMiddleware, allow_origins=_origins, allow_methods=["*"], allow_headers=["*"],
     )
-    return {"translation": translation, "detected": detected}
+
+    async def _health(request: Request):
+        return JSONResponse({"status": "ok", "cuda": torch.cuda.is_available()})
+
+    async def _api_translate(request: Request):
+        body = await request.json()
+        translation, detected = translate(
+            body.get("text", ""), body.get("source_lang", "auto"), body.get("target_lang", "en"),
+        )
+        return JSONResponse({"translation": translation, "detected": detected})
+
+    app.add_api_route("/health", _health, methods=["GET"])
+    app.add_api_route("/api/translate", _api_translate, methods=["POST"])
+    return app
+
+
+gradio.routes.App.create_app = staticmethod(_create_app)
 
 
 with gr.Blocks(title="Translator API") as demo:
-    gr.Markdown("# 🌐 Translator API\nBackend for the web frontend. See `/health`.")
+    gr.Markdown("# 🌐 Translator API\nBackend for the web frontend. REST: `POST /api/translate`.")
     with gr.Row():
         _inp = gr.Textbox(label="Text", lines=3)
         _out = gr.Textbox(label="Translation", lines=3)
@@ -163,8 +171,5 @@ with gr.Blocks(title="Translator API") as demo:
     _det = gr.Textbox(label="Detected", visible=False)
     gr.Button("Translate").click(translate, [_inp, _src, _tgt], [_out, _det], api_name="translate")
 
-app = gr.mount_gradio_app(api, demo, path="/ui")
-
 if __name__ == "__main__":
-    port = int(os.environ.get("GRADIO_SERVER_PORT") or os.environ.get("PORT") or 7860)
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    demo.queue().launch()
