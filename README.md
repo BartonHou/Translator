@@ -2,6 +2,12 @@
 
 Production-oriented multi-language-to-multi-language translation platform with a FastAPI backend, Celery worker, Redis caching/rate limiting, PostgreSQL job persistence, and a React frontend.
 
+**🌐 Live demo:** [bartonhou.github.io/Translator](https://bartonhou.github.io/Translator/)
+(free GitHub Pages frontend + free HuggingFace ZeroGPU backend — see
+[Deploying the free public demo](deploy/DEPLOY.md) for how it's wired up, and
+expect a slower response than the self-hosted GPU setup below since it runs on
+a shared free GPU.)
+
 ![Translator Platform Web UI](img/webpage.png)
 
 ## What this project does
@@ -338,6 +344,21 @@ Benchmark throughput/latency (API must be running):
 ```bash
 python scripts/bench.py --requests 200 --concurrency 16 --source en --target es
 ```
+
+### Public demo deployment (free, no self-hosting)
+
+The live demo above runs on two free services instead of the Docker stack:
+
+- **Frontend**: GitHub Pages, built by `.github/workflows/pages.yml`.
+- **Backend**: a self-contained app (`deploy/spaces/space_app.py`) on a free
+  HuggingFace **Gradio Space** using **ZeroGPU** (shared free GPU; falls back to
+  CPU otherwise). No Postgres/Redis/Celery — it's a minimal reimplementation of
+  the opus-mt + NLLB routing behind a single `POST /api/translate` endpoint.
+
+This path is free but slower (shared GPU, cold starts) and doesn't have queues,
+usage tracking, or async jobs. Full step-by-step setup, and the gotchas that bit
+us getting there (Space hardware tiers, CORS, port conflicts), are in
+[`deploy/DEPLOY.md`](deploy/DEPLOY.md).
 
 ## Testing
 

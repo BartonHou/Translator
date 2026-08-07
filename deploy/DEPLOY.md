@@ -30,7 +30,7 @@ Reuse your existing Space `BartonHou/Interactive_Image_Mosaic_Generator`.
    `CORS_ORIGINS` = your frontend origin.
 4. It rebuilds. Check `https://bartonhou-interactive-image-mosaic-generator.hf.space/health`
    returns `{"status":"ok", ...}`. That URL (without `/health`) is your **API base URL**.
-   The UI is at `/ui`.
+   The Gradio UI (a manual test form) is at the root `/`.
 
 ## 2. Frontend — GitHub Pages
 
@@ -52,3 +52,9 @@ Reuse your existing Space `BartonHou/Interactive_Image_Mosaic_Generator`.
   `deploy/spaces/`) and it rebuilds. The frontend redeploys on push to `master`.
 - If you fork under a different username, update: `CORS_ORIGINS` (Space var),
   `API_BASE_URL` (Pages var), and `--base=/<repo>/` in `.github/workflows/pages.yml`.
+- **Don't run `uvicorn.run()` yourself in `space_app.py`.** HF Spaces already
+  start Gradio apps via `demo.launch()`; calling uvicorn too causes an
+  `address already in use` crash-loop. Gradio's own API also sends no CORS
+  headers, which is why `space_app.py` patches `gradio.routes.App.create_app`
+  to inject `/health`, `/api/translate`, and CORS onto Gradio's own FastAPI app
+  instead of mounting a second one.
